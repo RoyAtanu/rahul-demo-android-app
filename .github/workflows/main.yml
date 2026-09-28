@@ -966,7 +966,7 @@ jobs:
 
           pytest \
             automation/test_app_lifecycle.py \
-            -v -s \
+            -v  \
             --tb=short \
             --junitxml=appium-results.xml
 
