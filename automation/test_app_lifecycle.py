@@ -1,4 +1,3 @@
-```python
 import os
 import time
 import pytest
@@ -445,4 +444,4 @@ def test_app_lifecycle():
                     "Warning while closing "
                     f"Appium session: {exc}"
                 )
-```
+
