@@ -354,13 +354,10 @@ jobs:
           printf '%s\n' "$RESPONSE" > pcloudy-devices.json
 
           echo ""
-          echo "Available Android devices:"
+          echo "Android devices returned by pCloudy:"
 
           jq -r '
             .result.models[]?
-            | select(
-                (.platform // "" | ascii_downcase) == "android"
-              )
             | "\(.id) | \(.full_name) | available=\(.available)"
           ' pcloudy-devices.json || true
 
@@ -406,6 +403,10 @@ jobs:
           echo "Configured device:"
           echo "$DEVICE_NAME"
 
+          # ----------------------------------------------------
+          # S25 ONLY
+          # ----------------------------------------------------
+
           if [[ "$DEVICE_NAME" != Samsung_GalaxyS25_* ]]; then
             echo "ERROR: Pipeline is restricted to Samsung Galaxy S25"
             exit 1
@@ -434,13 +435,10 @@ jobs:
             echo "Requested:"
             echo "$DEVICE_NAME"
             echo ""
-            echo "Available Android devices:"
+            echo "Available devices:"
 
             jq -r '
               .result.models[]?
-              | select(
-                  (.platform // "" | ascii_downcase) == "android"
-                )
               | "\(.id) | \(.full_name) | available=\(.available)"
             ' pcloudy-devices.json
 
@@ -498,6 +496,20 @@ jobs:
             exit 1
           fi
 
+          # ----------------------------------------------------
+          # pCloudy Book Device API
+          #
+          # POST:
+          # https://device.pcloudy.com/api/book_device
+          #
+          # Body:
+          # {
+          #   "token": "...",
+          #   "duration": 30,
+          #   "id": DEVICE_ID
+          # }
+          # ----------------------------------------------------
+
           BOOK_RESPONSE="$(
             curl \
               --silent \
@@ -523,50 +535,60 @@ jobs:
             || cat pcloudy-book-device.json
 
           # ----------------------------------------------------
-          # Try known booking/reservation locations.
-          # The API documentation screenshot confirms the
-          # BookingDto response, but the exact JSON field name
-          # is not exposed in the visible documentation.
+          # IMPORTANT:
+          #
+          # Actual pCloudy response:
+          #
+          # {
+          #   "result": {
+          #     "token": "...",
+          #     "code": 200,
+          #     "rid": 3806444
+          #   }
+          # }
+          #
+          # Therefore reservation ID = .result.rid
           # ----------------------------------------------------
+
+          BOOKING_CODE="$(
+            jq -r '
+              .result.code // empty
+            ' pcloudy-book-device.json
+          )"
+
+          if [ "$BOOKING_CODE" != "200" ]; then
+            echo ""
+            echo "ERROR: pCloudy booking was not successful."
+
+            echo ""
+            echo "Response:"
+            cat pcloudy-book-device.json
+
+            exit 1
+          fi
 
           BOOKING_ID="$(
             jq -r '
-              .result.bookedDevice.reservationId //
-              .result.bookedDevice.reservationID //
-              .result.bookedDevice.bookingId //
-              .result.bookedDevice.bookingID //
-              .result.reservationId //
-              .result.reservationID //
-              .result.bookingId //
-              .result.bookingID //
-              .result.bookedDevice.id //
-              .result.id //
-              .bookingId //
-              .bookingID //
-              .reservationId //
-              .reservationID //
-              empty
-            ' pcloudy-book-device.json |
-            head -n 1
+              .result.rid // empty
+            ' pcloudy-book-device.json
           )"
 
-          if [ -z "$BOOKING_ID" ] || [ "$BOOKING_ID" = "null" ]; then
+          if [ -z "$BOOKING_ID" ] ||
+             [ "$BOOKING_ID" = "null" ]; then
 
             echo ""
-            echo "ERROR: Device was booked, but reservation/booking ID"
-            echo "could not be extracted from the response."
+            echo "ERROR: pCloudy returned code 200 but rid is missing."
+
             echo ""
             echo "Full response:"
             cat pcloudy-book-device.json
-            echo ""
-            echo "Pipeline stopped to prevent Appium from using"
-            echo "an incorrect reservation ID."
 
             exit 1
           fi
 
           if ! [[ "$BOOKING_ID" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: Booking/Reservation ID is not numeric:"
+            echo ""
+            echo "ERROR: Invalid pCloudy rid:"
             echo "$BOOKING_ID"
             exit 1
           fi
@@ -574,8 +596,22 @@ jobs:
           echo "::add-mask::$BOOKING_ID"
 
           echo ""
-          echo "S25 booking successful"
-          echo "Reservation / Booking ID captured"
+          echo "=========================================="
+          echo "S25 BOOKING SUCCESSFUL"
+          echo "=========================================="
+
+          echo "Device:"
+          echo "$DEVICE_NAME"
+
+          echo ""
+          echo "Duration:"
+          echo "${PCLOUDY_DURATION} minutes"
+
+          echo ""
+          echo "Reservation ID:"
+          echo "$BOOKING_ID"
+
+          echo ""
 
           echo "reservation_id=$BOOKING_ID" >> "$GITHUB_OUTPUT"
 
@@ -621,9 +657,13 @@ jobs:
 
           echo "HTTP Status: $HTTP_CODE"
 
-          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+          if [ "$HTTP_CODE" -lt 200 ] ||
+             [ "$HTTP_CODE" -ge 300 ]; then
+
             echo "ERROR: pCloudy APK upload failed"
+
             cat pcloudy-upload.json
+
             exit 1
           fi
 
@@ -651,8 +691,11 @@ jobs:
           if [ -z "$UPLOAD_FILENAME" ] ||
              [ "$UPLOAD_FILENAME" = "null" ]; then
 
+            echo ""
             echo "ERROR: Could not determine uploaded filename"
+
             cat pcloudy-upload.json
+
             exit 1
           fi
 
@@ -662,6 +705,7 @@ jobs:
 
           echo "filename=$UPLOAD_FILENAME" >> "$GITHUB_OUTPUT"
 
+          echo ""
           echo "APK uploaded successfully"
 
 
@@ -718,6 +762,9 @@ jobs:
 
           PCLOUDY_DEVICE: ${{ steps.selected-device.outputs.device }}
 
+          # IMPORTANT:
+          # pCloudy Book Device returns:
+          # .result.rid
           RID: ${{ steps.book-device.outputs.reservation_id }}
 
           PCLOUDY_APPLICATION_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
@@ -730,7 +777,7 @@ jobs:
 
           PCLOUDY_DURATION: ${{ env.PCLOUDY_DURATION }}
 
-          PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
+          PCLOUDY_ENABLE_PERFORMANCE_DATA: ${{ env.PCLOUDY_ENABLE_PERFORMANCE_DATA }}
 
         run: |
           set -euo pipefail
@@ -773,6 +820,11 @@ jobs:
 
           if [ -z "$RID" ]; then
             echo "ERROR: Reservation ID is empty"
+            exit 1
+          fi
+
+          if ! [[ "$RID" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Reservation ID is not numeric"
             exit 1
           fi
 
