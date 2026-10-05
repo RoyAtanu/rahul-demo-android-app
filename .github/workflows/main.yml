@@ -21,6 +21,7 @@ env:
 
   PYTHONUNBUFFERED: "1"
 
+
 jobs:
 
   # ============================================================
@@ -318,6 +319,7 @@ jobs:
       # ========================================================
 
       - name: STAGE 8 - Get pCloudy Android devices
+        id: device-list
         shell: bash
 
         env:
@@ -342,7 +344,7 @@ jobs:
               --header "Content-Type: application/json" \
               --data "{
                 \"token\":\"${PCLOUDY_TOKEN}\",
-                \"duration\":30,
+                \"duration\":${PCLOUDY_DURATION},
                 \"platform\":\"Android\",
                 \"available_now\":true
               }" \
@@ -356,19 +358,18 @@ jobs:
 
           jq -r '
             .result.models[]?
-            | select(.available == true)
             | select(
                 (.platform // "" | ascii_downcase) == "android"
               )
-            | "\(.full_name) | \(.display_name) | Android \(.version)"
+            | "\(.id) | \(.full_name) | available=\(.available)"
           ' pcloudy-devices.json || true
 
 
       # ========================================================
-      # STAGE 9 - DEVICE VALIDATION
+      # STAGE 9 - FIND S25 DEVICE
       # ========================================================
 
-      - name: STAGE 9 - Validate configured device
+      - name: STAGE 9 - Find Samsung Galaxy S25
         id: selected-device
         shell: bash
 
@@ -376,7 +377,7 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 9 - Device Validation"
+          echo "STAGE 9 - Find Samsung Galaxy S25"
           echo "=========================================="
 
           DEVICES_FILE="config/devices.json"
@@ -405,7 +406,12 @@ jobs:
           echo "Configured device:"
           echo "$DEVICE_NAME"
 
-          FOUND="$(
+          if [[ "$DEVICE_NAME" != Samsung_GalaxyS25_* ]]; then
+            echo "ERROR: Pipeline is restricted to Samsung Galaxy S25"
+            exit 1
+          fi
+
+          DEVICE_ID="$(
             jq -r \
               --arg DEVICE "$DEVICE_NAME" '
                 .result.models[]?
@@ -414,15 +420,16 @@ jobs:
                     and
                     .available == true
                   )
-                | .full_name
+                | .id
               ' \
               pcloudy-devices.json |
             head -n 1
           )"
 
-          if [ -z "$FOUND" ]; then
+          if [ -z "$DEVICE_ID" ] || [ "$DEVICE_ID" = "null" ]; then
+
             echo ""
-            echo "ERROR: Requested device is not available."
+            echo "ERROR: Requested S25 is not available."
             echo ""
             echo "Requested:"
             echo "$DEVICE_NAME"
@@ -431,21 +438,146 @@ jobs:
 
             jq -r '
               .result.models[]?
-              | select(.available == true)
               | select(
                   (.platform // "" | ascii_downcase) == "android"
                 )
-              | .full_name
+              | "\(.id) | \(.full_name) | available=\(.available)"
             ' pcloudy-devices.json
 
             exit 1
           fi
 
           echo ""
-          echo "Device validation successful:"
-          echo "$FOUND"
+          echo "S25 found successfully"
+          echo "Device Name : $DEVICE_NAME"
+          echo "Device ID   : $DEVICE_ID"
 
-          echo "device=$FOUND" >> "$GITHUB_OUTPUT"
+          echo "device=$DEVICE_NAME" >> "$GITHUB_OUTPUT"
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+
+
+      # ========================================================
+      # STAGE 9B - BOOK S25 DEVICE
+      # ========================================================
+
+      - name: STAGE 9B - Book Samsung Galaxy S25
+        id: book-device
+        shell: bash
+
+        env:
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
+          DEVICE_ID: ${{ steps.selected-device.outputs.device_id }}
+          DEVICE_NAME: ${{ steps.selected-device.outputs.device }}
+          PCLOUDY_DURATION: ${{ env.PCLOUDY_DURATION }}
+
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 9B - Book Samsung Galaxy S25"
+          echo "=========================================="
+
+          echo "Device:"
+          echo "$DEVICE_NAME"
+
+          echo ""
+          echo "Device ID:"
+          echo "$DEVICE_ID"
+
+          echo ""
+          echo "Duration:"
+          echo "${PCLOUDY_DURATION} minutes"
+
+          if [ -z "$DEVICE_ID" ]; then
+            echo "ERROR: DEVICE_ID is empty"
+            exit 1
+          fi
+
+          if ! [[ "$DEVICE_ID" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: DEVICE_ID is not numeric"
+            exit 1
+          fi
+
+          BOOK_RESPONSE="$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 3 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "{
+                \"token\":\"${PCLOUDY_TOKEN}\",
+                \"duration\":${PCLOUDY_DURATION},
+                \"id\":${DEVICE_ID}
+              }" \
+              "https://device.pcloudy.com/api/book_device"
+          )"
+
+          printf '%s\n' "$BOOK_RESPONSE" > pcloudy-book-device.json
+
+          echo ""
+          echo "Book Device response:"
+          jq '.' pcloudy-book-device.json \
+            || cat pcloudy-book-device.json
+
+          # ----------------------------------------------------
+          # Try known booking/reservation locations.
+          # The API documentation screenshot confirms the
+          # BookingDto response, but the exact JSON field name
+          # is not exposed in the visible documentation.
+          # ----------------------------------------------------
+
+          BOOKING_ID="$(
+            jq -r '
+              .result.bookedDevice.reservationId //
+              .result.bookedDevice.reservationID //
+              .result.bookedDevice.bookingId //
+              .result.bookedDevice.bookingID //
+              .result.reservationId //
+              .result.reservationID //
+              .result.bookingId //
+              .result.bookingID //
+              .result.bookedDevice.id //
+              .result.id //
+              .bookingId //
+              .bookingID //
+              .reservationId //
+              .reservationID //
+              empty
+            ' pcloudy-book-device.json |
+            head -n 1
+          )"
+
+          if [ -z "$BOOKING_ID" ] || [ "$BOOKING_ID" = "null" ]; then
+
+            echo ""
+            echo "ERROR: Device was booked, but reservation/booking ID"
+            echo "could not be extracted from the response."
+            echo ""
+            echo "Full response:"
+            cat pcloudy-book-device.json
+            echo ""
+            echo "Pipeline stopped to prevent Appium from using"
+            echo "an incorrect reservation ID."
+
+            exit 1
+          fi
+
+          if ! [[ "$BOOKING_ID" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Booking/Reservation ID is not numeric:"
+            echo "$BOOKING_ID"
+            exit 1
+          fi
+
+          echo "::add-mask::$BOOKING_ID"
+
+          echo ""
+          echo "S25 booking successful"
+          echo "Reservation / Booking ID captured"
+
+          echo "reservation_id=$BOOKING_ID" >> "$GITHUB_OUTPUT"
 
 
       # ========================================================
@@ -497,7 +629,8 @@ jobs:
 
           echo ""
           echo "Upload response:"
-          cat pcloudy-upload.json | jq '.' \
+
+          jq '.' pcloudy-upload.json \
             || cat pcloudy-upload.json
 
           UPLOAD_FILENAME="$(
@@ -519,9 +652,7 @@ jobs:
              [ "$UPLOAD_FILENAME" = "null" ]; then
 
             echo "ERROR: Could not determine uploaded filename"
-
             cat pcloudy-upload.json
-
             exit 1
           fi
 
@@ -587,6 +718,8 @@ jobs:
 
           PCLOUDY_DEVICE: ${{ steps.selected-device.outputs.device }}
 
+          RID: ${{ steps.book-device.outputs.reservation_id }}
+
           PCLOUDY_APPLICATION_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
 
           PCLOUDY_APP_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
@@ -594,6 +727,8 @@ jobs:
           APP_PACKAGE: ${{ env.APP_PACKAGE }}
 
           PCLOUDY_APPIUM_URL: ${{ env.PCLOUDY_APPIUM_URL }}
+
+          PCLOUDY_DURATION: ${{ env.PCLOUDY_DURATION }}
 
           PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
 
@@ -608,12 +743,20 @@ jobs:
           echo "$PCLOUDY_DEVICE"
 
           echo ""
+          echo "Reservation ID:"
+          echo "$RID"
+
+          echo ""
           echo "Application:"
           echo "$PCLOUDY_APPLICATION_NAME"
 
           echo ""
           echo "Package:"
           echo "$APP_PACKAGE"
+
+          echo ""
+          echo "Duration:"
+          echo "$PCLOUDY_DURATION minutes"
 
           echo ""
           echo "Performance:"
@@ -625,6 +768,11 @@ jobs:
 
           if [ -z "$PCLOUDY_DEVICE" ]; then
             echo "ERROR: Device is empty"
+            exit 1
+          fi
+
+          if [ -z "$RID" ]; then
+            echo "ERROR: Reservation ID is empty"
             exit 1
           fi
 
@@ -655,11 +803,6 @@ jobs:
             --tb=short \
             --junitxml=appium-results.xml
 
-          echo ""
-          echo "=========================================="
-          echo "Appium test completed"
-          echo "=========================================="
-
 
       # ========================================================
       # STAGE 12 - PERFORMANCE RESULTS
@@ -678,7 +821,7 @@ jobs:
 
           mkdir -p performance-results
 
-          echo "Performance was enabled through:"
+          echo "Performance:"
           echo "pCloudy_EnablePerformanceData=true"
 
           if [ -f appium-results.xml ]; then
@@ -688,6 +831,7 @@ jobs:
 
           echo ""
           echo "Performance result directory:"
+
           find performance-results \
             -maxdepth 2 \
             -type f \
@@ -711,6 +855,7 @@ jobs:
             firebase-release.json
             pcloudy-auth.json
             pcloudy-devices.json
+            pcloudy-book-device.json
             pcloudy-upload.json
             performance-results/
 
