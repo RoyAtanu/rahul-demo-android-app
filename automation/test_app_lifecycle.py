@@ -1,3 +1,4 @@
+```python
 import os
 import time
 import pytest
@@ -29,22 +30,28 @@ PCLOUDY_EMAIL = os.environ["PCLOUDY_EMAIL"]
 PCLOUDY_ACCESS_KEY = os.environ["PCLOUDY_ACCESS_KEY"]
 
 PCLOUDY_APP_NAME = os.getenv(
-    "PCLOUDY_APP_NAME",
-    "firebase-app.apk"
+    "PCLOUDY_APPLICATION_NAME",
+    os.getenv(
+        "PCLOUDY_APP_NAME",
+        "firebase-app.apk"
+    )
 )
 
-PCLOUDY_APPIUM_URL = (
+PCLOUDY_APPIUM_URL = os.getenv(
+    "PCLOUDY_APPIUM_URL",
     "https://device.pcloudy.com/appiumcloud/wd/hub"
+)
+
+PCLOUDY_DURATION = int(
+    os.getenv(
+        "PCLOUDY_DURATION",
+        "30"
+    )
 )
 
 
 # ============================================================
-# Performance Data
-#
-# true  -> Performance data enabled
-# false -> Performance data disabled
-#
-# Default is true
+# Performance Configuration
 # ============================================================
 
 PERFORMANCE_DATA = os.getenv(
@@ -67,7 +74,7 @@ def create_driver():
     options = UiAutomator2Options()
 
     # ========================================================
-    # Standard W3C Android Capabilities
+    # Standard Appium / Android capabilities
     # ========================================================
 
     options.set_capability(
@@ -106,36 +113,33 @@ def create_driver():
     )
 
     # ========================================================
-    # Appium Performance Capabilities
-    # ========================================================
-
-    options.set_capability(
-        "appium:instrumentAppPerformance",
-        True
-    )
-
-    options.set_capability(
-        "appium:appPerformance",
-        True
-    )
-
-    # ========================================================
-    # Nested pCloudy Options (W3C Compliant)
+    # pCloudy options
     # ========================================================
 
     pcloudy_opts = {
         "pCloudy_Username": PCLOUDY_EMAIL,
         "pCloudy_ApiKey": PCLOUDY_ACCESS_KEY,
+
         "pCloudy_ApplicationName": PCLOUDY_APP_NAME,
-        "pCloudy_DurationInMinutes": 5,
+
+        "pCloudy_DurationInMinutes": PCLOUDY_DURATION,
+
         "pCloudy_EnableVideo": False,
+
         "pCloudy_EnablePerformanceData": PERFORMANCE_DATA,
+
         "pCloudy_EnableDeviceLogs": False,
+
         "appiumVersion": "3.1.1"
     }
 
+    # ========================================================
+    # Device selection
+    # ========================================================
+
     if RID:
         pcloudy_opts["pCloudy_ReservationId"] = int(RID)
+
     else:
         pcloudy_opts["pCloudy_DeviceFullName"] = DEVICE_NAME
 
@@ -145,7 +149,7 @@ def create_driver():
     )
 
     # ========================================================
-    # Print Configuration
+    # Print configuration
     # ========================================================
 
     print("")
@@ -153,24 +157,21 @@ def create_driver():
     print("Starting pCloudy Appium session")
     print("==========================================")
     print(f"Device           : {DEVICE_NAME}")
+
     if RID:
         print(f"Reservation ID   : {RID}")
+
     print(f"Package          : {APP_PACKAGE}")
-    print(
-        f"Performance Data : {PERFORMANCE_DATA}"
-    )
-    print(
-        "Appium Instrument : True"
-    )
-    print(
-        "App Performance   : True"
-    )
-    print(
-        "=========================================="
-    )
+    print(f"Application      : {PCLOUDY_APP_NAME}")
+    print(f"Duration         : {PCLOUDY_DURATION} minutes")
+    print(f"Performance Data : {PERFORMANCE_DATA}")
+    print("Appium Instrument: True")
+    print("App Performance  : True")
+    print(f"Appium URL       : {PCLOUDY_APPIUM_URL}")
+    print("==========================================")
 
     # ========================================================
-    # Retry Appium Session
+    # Retry Appium session
     # ========================================================
 
     last_error = None
@@ -179,6 +180,7 @@ def create_driver():
 
         try:
 
+            print("")
             print(
                 f"Creating pCloudy Appium session "
                 f"(attempt {attempt}/3)..."
@@ -189,6 +191,7 @@ def create_driver():
                 options=options
             )
 
+            print("")
             print(
                 "Appium session created successfully"
             )
@@ -199,6 +202,7 @@ def create_driver():
 
             last_error = exc
 
+            print("")
             print(
                 f"Appium session attempt "
                 f"{attempt} failed:"
@@ -209,16 +213,15 @@ def create_driver():
             if attempt < 3:
 
                 print(
-                    "Waiting 15 seconds "
-                    "before retry..."
+                    "Waiting 15 seconds before retry..."
                 )
 
                 time.sleep(15)
 
     raise RuntimeError(
-        "Could not create pCloudy Appium "
-        "session after 3 attempts "
-        f"for device: {DEVICE_NAME}"
+        "Could not create pCloudy Appium session "
+        f"after 3 attempts for device: "
+        f"{DEVICE_NAME}"
     ) from last_error
 
 
@@ -245,27 +248,21 @@ def test_app_lifecycle():
         print("==========================================")
         print(f"Device           : {DEVICE_NAME}")
         print(f"Package          : {APP_PACKAGE}")
-        print(
-            f"Performance Data : {PERFORMANCE_DATA}"
-        )
-        print(
-            "Appium Instrument : True"
-        )
-        print(
-            "App Performance   : True"
-        )
-        print(
-            "=========================================="
-        )
+        print(f"Application      : {PCLOUDY_APP_NAME}")
+        print(f"Duration         : {PCLOUDY_DURATION} minutes")
+        print(f"Performance Data : {PERFORMANCE_DATA}")
+        print("Appium Instrument: True")
+        print("App Performance  : True")
+        print("==========================================")
 
         # ====================================================
         # 1. Launch Application
         # ====================================================
 
         print("")
-        print(
-            "Step 1: Launching application"
-        )
+        print("Step 1: Launching application")
+
+        driver.activate_app(APP_PACKAGE)
 
         time.sleep(10)
 
@@ -423,11 +420,11 @@ def test_app_lifecycle():
                 )
                 print("")
 
-            except Exception as r_exc:
+            except Exception as report_error:
 
                 print(
                     "Warning: Could not retrieve "
-                    f"report link programmatically: {r_exc}"
+                    f"report link: {report_error}"
                 )
 
             # =================================================
@@ -448,3 +445,4 @@ def test_app_lifecycle():
                     "Warning while closing "
                     f"Appium session: {exc}"
                 )
+```
