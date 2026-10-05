@@ -1,4 +1,4 @@
-name: Android - Firebase to pCloudy Sequential Performance
+name: Android - Firebase to pCloudy Appium Performance
 
 on:
   push:
@@ -19,20 +19,17 @@ env:
 
   PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
 
-  PCLOUDY_INSTALL_ENDPOINT: https://device.pcloudy.com/api/v2/install-app
-
   PYTHONUNBUFFERED: "1"
-
 
 jobs:
 
   # ============================================================
-  # MAIN JOB
+  # JOB
   # ============================================================
 
   appium-pcloudy:
 
-    name: Firebase → pCloudy → Sequential Devices
+    name: Firebase → pCloudy → Appium → Performance
 
     runs-on: ubuntu-latest
 
@@ -87,7 +84,7 @@ jobs:
 
 
       # ========================================================
-      # STAGE 4 - GET LATEST FIREBASE RELEASE
+      # STAGE 4 - LATEST FIREBASE RELEASE
       # ========================================================
 
       - name: STAGE 4 - Get latest Firebase Android release
@@ -179,6 +176,7 @@ jobs:
 
           echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
 
+          echo ""
           echo "Latest Firebase release:"
           echo "$RELEASE_NAME"
 
@@ -344,7 +342,7 @@ jobs:
               --header "Content-Type: application/json" \
               --data "{
                 \"token\":\"${PCLOUDY_TOKEN}\",
-                \"duration\":${PCLOUDY_DURATION},
+                \"duration\":30,
                 \"platform\":\"Android\",
                 \"available_now\":true
               }" \
@@ -368,16 +366,12 @@ jobs:
 
       # ========================================================
       # STAGE 9 - VALIDATE ALL CONFIGURED DEVICES
-      #
-      # IMPORTANT:
-      # Unavailable devices DO NOT fail this stage.
-      # They are recorded and skipped later.
       # ========================================================
+
       - name: STAGE 9 - Validate all configured devices
         id: device-validation
         shell: bash
-        env:
-          PCLOUDY_DEVICES_JSON: config/devices.json
+
         run: |
           set -uo pipefail
 
@@ -387,18 +381,20 @@ jobs:
 
           mkdir -p device-results
 
-          if [ ! -f "$PCLOUDY_DEVICES_JSON" ]; then
-            echo "ERROR: $PCLOUDY_DEVICES_JSON not found"
+          DEVICES_FILE="config/devices.json"
+
+          if [ ! -f "$DEVICES_FILE" ]; then
+            echo "ERROR: $DEVICES_FILE not found"
             exit 1
           fi
 
-          jq empty "$PCLOUDY_DEVICES_JSON"
+          jq empty "$DEVICES_FILE"
 
           ENABLED_COUNT="$(
             jq '[
               .devices[]?
               | select(.enabled == true)
-            ] | length' "$PCLOUDY_DEVICES_JSON"
+            ] | length' "$DEVICES_FILE"
           )"
 
           if [ "$ENABLED_COUNT" -eq 0 ]; then
@@ -412,13 +408,14 @@ jobs:
           AVAILABLE_COUNT=0
           UNAVAILABLE_COUNT=0
 
-          while IFS= read -r DEVICE; do
+          while IFS= read -r DEVICE_NAME; do
+
             echo ""
-            echo "Checking: $DEVICE"
+            echo "Checking: $DEVICE_NAME"
 
             FOUND="$(
               jq -r \
-                --arg DEVICE "$DEVICE" '
+                --arg DEVICE "$DEVICE_NAME" '
                   .result.models[]?
                   | select(
                       .full_name == $DEVICE
@@ -430,20 +427,31 @@ jobs:
             )"
 
             if [ -z "$FOUND" ]; then
+
               echo "STATUS: NOT AVAILABLE"
-              printf '%s\n' "$DEVICE" >> device-results/unavailable-devices.txt
+
+              printf '%s\n' "$DEVICE_NAME" \
+                >> device-results/unavailable-devices.txt
+
               UNAVAILABLE_COUNT=$((UNAVAILABLE_COUNT + 1))
+
             else
+
               echo "STATUS: AVAILABLE"
-              printf '%s\n' "$DEVICE" >> device-results/available-devices.txt
+
+              printf '%s\n' "$DEVICE_NAME" \
+                >> device-results/available-devices.txt
+
               AVAILABLE_COUNT=$((AVAILABLE_COUNT + 1))
+
             fi
+
           done < <(
             jq -r '
               .devices[]?
               | select(.enabled == true)
               | .name
-            ' "$PCLOUDY_DEVICES_JSON"
+            ' "$DEVICES_FILE"
           )
 
           {
@@ -460,11 +468,11 @@ jobs:
           echo "Unavailable: $UNAVAILABLE_COUNT"
           echo "=========================================="
 
-          # Do NOT exit 1 for unavailable devices.
+          # Unavailable devices are SKIPPED, not a pipeline failure.
 
 
       # ========================================================
-      # STAGE 10 - UPLOAD APK
+      # STAGE 10 - UPLOAD APK TO PCLOUDY
       # ========================================================
 
       - name: STAGE 10 - Upload APK to pCloudy
@@ -478,7 +486,7 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 10 - Upload APK"
+          echo "STAGE 10 - Upload APK to pCloudy"
           echo "=========================================="
 
           HTTP_CODE="$(
@@ -510,7 +518,7 @@ jobs:
             exit 1
           fi
 
-          cat pcloudy-upload.json | jq '.' \
+          jq '.' pcloudy-upload.json 2>/dev/null \
             || cat pcloudy-upload.json
 
           UPLOAD_FILENAME="$(
@@ -536,27 +544,36 @@ jobs:
             exit 1
           fi
 
-          echo "pCloudy application: $UPLOAD_FILENAME"
+          echo "pCloudy Application:"
+          echo "$UPLOAD_FILENAME"
 
           echo "filename=$UPLOAD_FILENAME" >> "$GITHUB_OUTPUT"
 
 
       # ========================================================
-      # PYTHON / APPIUM SETUP
+      # STAGE 11 - SETUP PYTHON
       # ========================================================
 
-      - name: Setup Python
+      - name: STAGE 11 - Setup Python
         uses: actions/setup-python@v5
 
         with:
           python-version: "3.12"
 
 
-      - name: Install Python dependencies
+      # ========================================================
+      # STAGE 12 - INSTALL APPIUM DEPENDENCIES
+      # ========================================================
+
+      - name: STAGE 12 - Install Appium dependencies
         shell: bash
 
         run: |
           set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 12 - Appium Dependencies"
+          echo "=========================================="
 
           python -m pip install --upgrade pip
 
@@ -567,37 +584,48 @@ jobs:
 
           pip install -r requirements.txt
 
+          echo ""
+          echo "Installed packages:"
           pip list
 
 
       # ========================================================
-      # STAGE 11-16
+      # STAGE 13 - SEQUENTIAL PCLOUDY PERF. AUTOMATION
       #
-      # ALL ENABLED DEVICES RUN SEQUENTIALLY.
+      # IMPORTANT:
+      # DO NOT call /api/book_device here.
       #
-      # 11 BOOK
-      # 12 INSTALL
-      # 13 PERFORMANCE
-      # 14 APPIUM
-      # 15 DOWNLOAD PERFORMANCE
-      # 16 RELEASE
+      # The Appium Cloud endpoint creates the automated session.
+      # This is what allows pCloudy to classify the session as
+      # Perf. Automation instead of Manual Booking.
+      #
+      # Each enabled device is executed one after another.
       # ========================================================
-      - name: STAGE 11-16 - Sequential pCloudy Device Sessions
-        id: sequential-sessions
+
+      - name: STAGE 13 - Sequential pCloudy Perf. Automation
+        id: perf-automation
         shell: bash
+
         env:
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
-          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
+
+          PCLOUDY_APPLICATION_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
           PCLOUDY_APP_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
+
           APP_PACKAGE: ${{ env.APP_PACKAGE }}
+
           PCLOUDY_APPIUM_URL: ${{ env.PCLOUDY_APPIUM_URL }}
+
+          PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
+
           PCLOUDY_DURATION: ${{ env.PCLOUDY_DURATION }}
-          PCLOUDY_ENABLE_PERFORMANCE_DATA: ${{ env.PCLOUDY_ENABLE_PERFORMANCE_DATA }}
+
         run: |
           set -uo pipefail
 
-          mkdir -p performance-results device-results
+          mkdir -p device-results
+          mkdir -p performance-results
 
           DEVICES_FILE="config/devices.json"
           SUMMARY_FILE="device-results/summary.tsv"
@@ -614,6 +642,7 @@ jobs:
           DEVICE_INDEX=0
 
           while IFS= read -r DEVICE_NAME; do
+
             DEVICE_INDEX=$((DEVICE_INDEX + 1))
 
             SAFE_DEVICE="$(
@@ -622,19 +651,27 @@ jobs:
             )"
 
             DEVICE_DIR="device-results/${DEVICE_INDEX}-${SAFE_DEVICE}"
+
             mkdir -p "$DEVICE_DIR"
 
-            RID=""
+            LOG_FILE="$DEVICE_DIR/appium.log"
+            JUNIT_FILE="$DEVICE_DIR/appium-results.xml"
+
             DEVICE_STATUS="FAILED"
             DEVICE_REASON="UNKNOWN"
 
             echo ""
             echo "##################################################"
-            echo "# DEVICE SESSION ${DEVICE_INDEX}/${DEVICE_COUNT}"
+            echo "# PERF. AUTOMATION SESSION"
+            echo "# DEVICE ${DEVICE_INDEX}/${DEVICE_COUNT}"
             echo "# ${DEVICE_NAME}"
             echo "##################################################"
 
-            # Re-check availability immediately before booking.
+            # --------------------------------------------------
+            # Re-check availability immediately before starting
+            # the Appium Cloud session.
+            # --------------------------------------------------
+
             CURRENT_DEVICE="$(
               jq -r \
                 --arg DEVICE "$DEVICE_NAME" '
@@ -649,377 +686,128 @@ jobs:
             )"
 
             if [ -z "$CURRENT_DEVICE" ]; then
-              echo "DEVICE SKIPPED: $DEVICE_NAME"
+
+              echo "DEVICE SKIPPED"
+              echo "Device: $DEVICE_NAME"
               echo "Reason: DEVICE_NOT_AVAILABLE"
 
               printf '%s\t%s\tSKIPPED\tDEVICE_NOT_AVAILABLE\n' \
-                "$DEVICE_INDEX" "$DEVICE_NAME" >> "$SUMMARY_FILE"
-
-              continue
-            fi
-
-            # ==================================================
-            # STAGE 11 - BOOK DEVICE
-            #
-            # pCloudy device discovery returns a numeric device ID.
-            # We match devices.json "name" to pCloudy's "full_name",
-            # then send the numeric pCloudy "id" to book_device.
-            # ==================================================
-            echo ""
-            echo "=========================================="
-            echo "STAGE 11 - BOOK DEVICE"
-            echo "=========================================="
-
-            DEVICE_ID="$(
-              jq -r \
-                --arg DEVICE "$DEVICE_NAME" '
-                  .result.models[]?
-                  | select(.full_name == $DEVICE)
-                  | .id
-                ' pcloudy-devices.json |
-              head -n 1
-            )"
-
-            if [ -z "$DEVICE_ID" ] || [ "$DEVICE_ID" = "null" ]; then
-              echo "ERROR: Could not find pCloudy numeric device ID"
-              echo "Configured device: $DEVICE_NAME"
-
-              DEVICE_STATUS="FAILED"
-              DEVICE_REASON="DEVICE_ID_NOT_FOUND"
-
-              printf '%s\\t%s\\t%s\\t%s\\n' \
                 "$DEVICE_INDEX" "$DEVICE_NAME" \
-                "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
+                >> "$SUMMARY_FILE"
 
               continue
+
             fi
 
-            echo "Configured device: $DEVICE_NAME"
-            echo "pCloudy device ID: $DEVICE_ID"
+            echo "Device is available."
+            echo "Starting pCloudy Appium Cloud session..."
+            echo "Session type expected: Perf. Automation"
 
-            BOOK_RESPONSE_FILE="$DEVICE_DIR/book-response.json"
+            export PCLOUDY_DEVICE="$DEVICE_NAME"
+            export PCLOUDY_APPLICATION_NAME="$PCLOUDY_APPLICATION_NAME"
+            export PCLOUDY_APP_NAME="$PCLOUDY_APP_NAME"
+            export APP_PACKAGE="$APP_PACKAGE"
+            export PCLOUDY_APPIUM_URL="$PCLOUDY_APPIUM_URL"
+            export PCLOUDY_ENABLE_PERFORMANCE_DATA="true"
+            export PCLOUDY_DURATION="$PCLOUDY_DURATION"
 
-            BOOK_PAYLOAD="$(
-              jq -n \
-                --arg token "$PCLOUDY_TOKEN" \
-                --argjson device_id "$DEVICE_ID" \
-                --argjson duration "$PCLOUDY_DURATION" '
-                  {
-                    token: $token,
-                    id: $device_id,
-                    duration: $duration
-                  }
-                '
-            )"
-
-            printf '%s\\n' "$BOOK_PAYLOAD" > "$DEVICE_DIR/book-request.json"
-
-            BOOK_HTTP_CODE="$(
-              curl \
-                --silent \
-                --show-error \
-                --request POST \
-                --header "Content-Type: application/json" \
-                --data "$BOOK_PAYLOAD" \
-                --output "$BOOK_RESPONSE_FILE" \
-                --write-out "%{http_code}" \
-                "https://device.pcloudy.com/api/book_device" \
-              || true
-            )"
-
-            echo "Book HTTP Status: $BOOK_HTTP_CODE"
-            jq '.' "$BOOK_RESPONSE_FILE" 2>/dev/null || cat "$BOOK_RESPONSE_FILE"
-
-            RID="$(
-              jq -r '
-                .result.rid //
-                .result.reservation_id //
-                .result.reservationId //
-                .result.id //
-                .rid //
-                empty
-              ' "$BOOK_RESPONSE_FILE" 2>/dev/null |
-              head -n 1
-            )"
-
-            if [ -z "$RID" ] || [ "$RID" = "null" ]; then
-
-              BOOK_ERROR="$(
-                jq -r '
-                  .result.error //
-                  .error //
-                  .message //
-                  empty
-                ' "$BOOK_RESPONSE_FILE" 2>/dev/null |
-                head -n 1
-              )"
-
-              if printf '%s' "$BOOK_ERROR" |
-                 grep -qiE 'device[[:space:]_-]*not[[:space:]_-]*available|not available|unavailable'; then
-
-                echo "DEVICE SKIPPED"
-                echo "Device: $DEVICE_NAME"
-                echo "Reason: DEVICE_NOT_AVAILABLE"
-                echo "pCloudy booking response: $BOOK_ERROR"
-
-                DEVICE_STATUS="SKIPPED"
-                DEVICE_REASON="DEVICE_NOT_AVAILABLE"
-
-                printf '%s\t%s\t%s\t%s\n'                   "$DEVICE_INDEX" "$DEVICE_NAME"                   "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
-
-                continue
-
-              else
-
-                echo "ERROR: Device booking failed"
-                echo "pCloudy booking error: ${BOOK_ERROR:-UNKNOWN}"
-
-                DEVICE_STATUS="FAILED"
-                DEVICE_REASON="BOOKING_FAILED"
-
-                printf '%s\t%s\t%s\t%s\n'                   "$DEVICE_INDEX" "$DEVICE_NAME"                   "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
-
-                continue
-              fi
-            fi
-
-            echo "::add-mask::$RID"
-            echo "Device booked successfully. RID: $RID"
-
-            # ==================================================
-            # STAGE 12 - INSTALL APK
-            # ==================================================
             echo ""
-            echo "=========================================="
-            echo "STAGE 12 - INSTALL APK"
-            echo "=========================================="
+            echo "pCloudy Device:"
+            echo "$PCLOUDY_DEVICE"
 
-            INSTALL_PAYLOAD="$(
-              jq -n \
-                --argjson rid "$RID" \
-                --arg filename "$PCLOUDY_APP_NAME" \
-                '{
-                  rid: $rid,
-                  filename: $filename,
-                  appInstallOnly: false,
-                  trustApp: true
-                }'
-            )"
+            echo ""
+            echo "pCloudy Application:"
+            echo "$PCLOUDY_APPLICATION_NAME"
 
-            INSTALL_RESPONSE_FILE="$DEVICE_DIR/install-response.json"
+            echo ""
+            echo "pCloudy Appium URL:"
+            echo "$PCLOUDY_APPIUM_URL"
 
-            INSTALL_HTTP_CODE="$(
-              curl \
-                --http1.1 \
-                --silent \
-                --show-error \
-                --location \
-                --retry 3 \
-                --retry-delay 3 \
-                --retry-all-errors \
-                --connect-timeout 30 \
-                --max-time 180 \
-                --output "$INSTALL_RESPONSE_FILE" \
-                --write-out "%{http_code}" \
-                --request POST \
-                --header "Content-Type: application/json" \
-                --header "token: ${PCLOUDY_TOKEN}" \
-                --user "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
-                --data "$INSTALL_PAYLOAD" \
-                "${PCLOUDY_INSTALL_ENDPOINT}" \
-              || true
-            )"
+            echo ""
+            echo "Performance data:"
+            echo "$PCLOUDY_ENABLE_PERFORMANCE_DATA"
 
-            echo "Install HTTP Status: $INSTALL_HTTP_CODE"
-            jq '.' "$INSTALL_RESPONSE_FILE" 2>/dev/null || cat "$INSTALL_RESPONSE_FILE"
+            # --------------------------------------------------
+            # Run Appium directly against pCloudy Appium Cloud.
+            #
+            # IMPORTANT:
+            # No /api/book_device
+            # No manual reservation
+            # No manual install
+            #
+            # pCloudy provisions the device and application through
+            # the Appium capabilities used by test_app_lifecycle.py.
+            # --------------------------------------------------
 
-            if [ "$INSTALL_HTTP_CODE" -lt 200 ] || [ "$INSTALL_HTTP_CODE" -ge 300 ]; then
-              DEVICE_STATUS="FAILED"
-              DEVICE_REASON="APK_INSTALL_FAILED"
-            else
-              INSTALL_STATUS="$(
-                jq -r '
-                  .status //
-                  .result.status //
-                  empty
-                ' "$INSTALL_RESPONSE_FILE" 2>/dev/null || true
-              )"
+            echo ""
+            echo "Running Appium test..."
 
-              if [ "$INSTALL_STATUS" = "error" ]; then
-                DEVICE_STATUS="FAILED"
-                DEVICE_REASON="APK_INSTALL_FAILED"
-              fi
-            fi
+            set +e
 
-            # ==================================================
-            # STAGE 13 - START PERFORMANCE DATA
-            # ==================================================
-            if [ "$DEVICE_STATUS" != "FAILED" ]; then
-              echo ""
-              echo "=========================================="
-              echo "STAGE 13 - START PERFORMANCE DATA"
-              echo "=========================================="
-
-              PERFORMANCE_RESPONSE_FILE="$DEVICE_DIR/performance-start.json"
-
-              PERFORMANCE_HTTP_CODE="$(
-                curl \
-                  --silent \
-                  --show-error \
-                  --request POST \
-                  --header "Content-Type: application/json" \
-                  --data "{
-                    \"token\":\"${PCLOUDY_TOKEN}\",
-                    \"rid\":\"${RID}\",
-                    \"pkg\":\"${APP_PACKAGE}\"
-                  }" \
-                  --output "$PERFORMANCE_RESPONSE_FILE" \
-                  --write-out "%{http_code}" \
-                  "https://device.pcloudy.com/api/start_performance_data" \
-                || true
-              )"
-
-              echo "Performance API HTTP Status: $PERFORMANCE_HTTP_CODE"
-              jq '.' "$PERFORMANCE_RESPONSE_FILE" 2>/dev/null || cat "$PERFORMANCE_RESPONSE_FILE"
-
-              if [ "$PERFORMANCE_HTTP_CODE" -lt 200 ] || [ "$PERFORMANCE_HTTP_CODE" -ge 300 ]; then
-                DEVICE_STATUS="FAILED"
-                DEVICE_REASON="PERFORMANCE_START_FAILED"
-              fi
-            fi
-
-            # ==================================================
-            # STAGE 14 - APPIUM AUTOMATION
-            # ==================================================
-            if [ "$DEVICE_STATUS" != "FAILED" ]; then
-              echo ""
-              echo "=========================================="
-              echo "STAGE 14 - APPIUM AUTOMATION"
-              echo "=========================================="
-
-              export PCLOUDY_DEVICE="$DEVICE_NAME"
-              export PCLOUDY_APPLICATION_NAME="$PCLOUDY_APP_NAME"
-              export PCLOUDY_APP_NAME="$PCLOUDY_APP_NAME"
-              export APP_PACKAGE="$APP_PACKAGE"
-              export PCLOUDY_APPIUM_URL="$PCLOUDY_APPIUM_URL"
-              export PCLOUDY_ENABLE_PERFORMANCE_DATA="true"
-              export RID="$RID"
-
-              APPIUM_RESULT_FILE="$DEVICE_DIR/appium-results.xml"
-
-              if pytest \
+            timeout 30m \
+              pytest \
                 automation/test_app_lifecycle.py \
                 -v \
                 -s \
                 --tb=short \
-                --junitxml="$APPIUM_RESULT_FILE"; then
-                echo "Appium test PASSED"
+                --junitxml="$JUNIT_FILE" \
+                2>&1 | tee "$LOG_FILE"
+
+            TEST_EXIT=${PIPESTATUS[0]}
+
+            set -e
+
+            echo ""
+            echo "Pytest exit code: $TEST_EXIT"
+
+            # --------------------------------------------------
+            # If pCloudy could not allocate the requested device,
+            # treat it as SKIPPED and continue to the next device.
+            # Other Appium/test failures remain FAILED.
+            # --------------------------------------------------
+
+            if [ "$TEST_EXIT" -eq 0 ]; then
+
+              DEVICE_STATUS="PASSED"
+              DEVICE_REASON="PERF_AUTOMATION_COMPLETED"
+
+            else
+
+              if grep -Eqi \
+                'device[[:space:]_-]*not[[:space:]_-]*available|device not found|no device available|unavailable|could not allocate device|unable to allocate device|reservation.*not available' \
+                "$LOG_FILE"; then
+
+                DEVICE_STATUS="SKIPPED"
+                DEVICE_REASON="DEVICE_NOT_AVAILABLE"
+
+                echo ""
+                echo "DEVICE SKIPPED"
+                echo "Reason: DEVICE_NOT_AVAILABLE"
+
               else
-                echo "Appium test FAILED"
+
                 DEVICE_STATUS="FAILED"
                 DEVICE_REASON="APPIUM_TEST_FAILED"
+
+                echo ""
+                echo "DEVICE FAILED"
+                echo "Reason: APPIUM_TEST_FAILED"
+
               fi
-            fi
 
-            # ==================================================
-            # STAGE 15 - DOWNLOAD PERFORMANCE DATA
-            # ==================================================
-            echo ""
-            echo "=========================================="
-            echo "STAGE 15 - DOWNLOAD PERFORMANCE DATA"
-            echo "=========================================="
-
-            if [ -n "$RID" ]; then
-              FILE_LIST_RESPONSE="$DEVICE_DIR/performance-file-list.json"
-
-              FILE_LIST_HTTP_CODE="$(
-                curl \
-                  --silent \
-                  --show-error \
-                  --request POST \
-                  --header "Content-Type: application/json" \
-                  --data "{
-                    \"token\":\"${PCLOUDY_TOKEN}\",
-                    \"rid\":\"${RID}\"
-                  }" \
-                  --output "$FILE_LIST_RESPONSE" \
-                  --write-out "%{http_code}" \
-                  "https://device.pcloudy.com/api/manual_access_files_list" \
-                || true
-              )"
-
-              echo "File list HTTP Status: $FILE_LIST_HTTP_CODE"
-              jq '.' "$FILE_LIST_RESPONSE" 2>/dev/null || cat "$FILE_LIST_RESPONSE"
-
-              mkdir -p "$DEVICE_DIR/performance"
-
-              DOWNLOAD_RESPONSE="$DEVICE_DIR/performance-download.json"
-
-              DOWNLOAD_HTTP_CODE="$(
-                curl \
-                  --silent \
-                  --show-error \
-                  --request POST \
-                  --header "Content-Type: application/json" \
-                  --data "{
-                    \"token\":\"${PCLOUDY_TOKEN}\",
-                    \"rid\":\"${RID}\"
-                  }" \
-                  --output "$DOWNLOAD_RESPONSE" \
-                  --write-out "%{http_code}" \
-                  "https://device.pcloudy.com/api/download_manual_access_data" \
-                || true
-              )"
-
-              echo "Performance download HTTP Status: $DOWNLOAD_HTTP_CODE"
-              jq '.' "$DOWNLOAD_RESPONSE" 2>/dev/null || cat "$DOWNLOAD_RESPONSE"
-
-              cp "$DOWNLOAD_RESPONSE" \
-                "$DEVICE_DIR/performance/performance-download-response.json"
-            fi
-
-            # ==================================================
-            # STAGE 16 - RELEASE DEVICE
-            # ALWAYS RUN FOR BOOKED DEVICES
-            # ==================================================
-            echo ""
-            echo "=========================================="
-            echo "STAGE 16 - RELEASE DEVICE"
-            echo "=========================================="
-
-            RELEASE_RESPONSE="$DEVICE_DIR/release-response.json"
-
-            RELEASE_HTTP_CODE="$(
-              curl \
-                --silent \
-                --show-error \
-                --request POST \
-                --header "Content-Type: application/json" \
-                --data "{
-                  \"token\":\"${PCLOUDY_TOKEN}\",
-                  \"rid\":\"${RID}\",
-                  \"id\":\"${DEVICE_NAME}\"
-                }" \
-                --output "$RELEASE_RESPONSE" \
-                --write-out "%{http_code}" \
-                "https://device.pcloudy.com/api/release_device" \
-              || true
-            )"
-
-            echo "Release HTTP Status: $RELEASE_HTTP_CODE"
-            jq '.' "$RELEASE_RESPONSE" 2>/dev/null || cat "$RELEASE_RESPONSE"
-
-            if [ "$DEVICE_STATUS" != "FAILED" ]; then
-              DEVICE_STATUS="PASSED"
-              DEVICE_REASON="ALL_REQUIRED_STAGES_COMPLETED"
             fi
 
             printf '%s\t%s\t%s\t%s\n' \
               "$DEVICE_INDEX" "$DEVICE_NAME" \
-              "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
+              "$DEVICE_STATUS" "$DEVICE_REASON" \
+              >> "$SUMMARY_FILE"
 
             echo ""
-            echo "DEVICE RESULT: $DEVICE_NAME | $DEVICE_STATUS | $DEVICE_REASON"
+            echo "DEVICE RESULT:"
+            echo "$DEVICE_NAME | $DEVICE_STATUS | $DEVICE_REASON"
+
+            echo ""
+            echo "Moving to next device..."
 
           done < <(
             jq -r '
@@ -1031,19 +819,95 @@ jobs:
 
           echo ""
           echo "=================================================="
-          echo "DEVICE TEST SUMMARY"
+          echo "PERF. AUTOMATION DEVICE SUMMARY"
           echo "=================================================="
 
-          column -t -s $'\t' "$SUMMARY_FILE" || cat "$SUMMARY_FILE"
+          column -t -s $'\t' "$SUMMARY_FILE" \
+            || cat "$SUMMARY_FILE"
+
+
+      # ========================================================
+      # STAGE 14 - COLLECT PERFORMANCE RESULTS
+      # ========================================================
+
+      - name: STAGE 14 - Collect Performance Results
+        if: always()
+        shell: bash
+
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 14 - Performance Results"
+          echo "=========================================="
+
+          mkdir -p performance-results
+
+          echo "Performance automation was enabled through:"
+          echo "PCLOUDY_ENABLE_PERFORMANCE_DATA=true"
+
+          if [ -d device-results ]; then
+
+            find device-results \
+              -type f \
+              -name "*.xml" \
+              -print \
+              -exec cp {} performance-results/ \; \
+              || true
+
+            find device-results \
+              -type f \
+              -name "appium.log" \
+              -print \
+              || true
+
+          fi
+
+          echo ""
+          echo "Performance result directory:"
+
+          find performance-results \
+            -maxdepth 2 \
+            -type f \
+            -print \
+            || true
+
+
+      # ========================================================
+      # STAGE 15 - BUILD FINAL DEVICE SUMMARY
+      # ========================================================
+
+      - name: STAGE 15 - Build final device summary
+        if: always()
+        shell: bash
+
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 15 - Final Device Summary"
+          echo "=========================================="
+
+          SUMMARY_FILE="device-results/summary.tsv"
+
+          if [ ! -f "$SUMMARY_FILE" ]; then
+            echo "ERROR: Device summary was not created"
+            exit 1
+          fi
 
           PASSED_COUNT="$(
-            awk -F '\t' '$3=="PASSED"{c++} END{print c+0}' "$SUMMARY_FILE"
+            awk -F '\t' '$3=="PASSED"{c++} END{print c+0}' \
+              "$SUMMARY_FILE"
           )"
+
           FAILED_COUNT="$(
-            awk -F '\t' '$3=="FAILED"{c++} END{print c+0}' "$SUMMARY_FILE"
+            awk -F '\t' '$3=="FAILED"{c++} END{print c+0}' \
+              "$SUMMARY_FILE"
           )"
+
           SKIPPED_COUNT="$(
-            awk -F '\t' '$3=="SKIPPED"{c++} END{print c+0}' "$SUMMARY_FILE"
+            awk -F '\t' '$3=="SKIPPED"{c++} END{print c+0}' \
+              "$SUMMARY_FILE"
           )"
 
           {
@@ -1052,22 +916,30 @@ jobs:
             echo "SKIPPED=$SKIPPED_COUNT"
           } > device-results/final-summary.txt
 
+          echo ""
+          echo "=================================================="
+          echo "FINAL DEVICE SUMMARY"
+          echo "=================================================="
+
+          column -t -s $'\t' "$SUMMARY_FILE" \
+            || cat "$SUMMARY_FILE"
+
+          echo ""
           echo "Passed:  $PASSED_COUNT"
           echo "Failed:  $FAILED_COUNT"
           echo "Skipped: $SKIPPED_COUNT"
 
-          # Do not fail here. Stage 17 must upload artifacts first.
 
       # ========================================================
-      # STAGE 17 - UPLOAD ALL RESULTS
+      # STAGE 16 - UPLOAD ALL RESULTS
       # ========================================================
 
-      - name: STAGE 17 - Upload All Results
+      - name: STAGE 16 - Upload All Results
         if: always()
         uses: actions/upload-artifact@v4
 
         with:
-          name: android-pcloudy-sequential-results
+          name: android-pcloudy-perf-automation-results
 
           path: |
             firebase-release.json
@@ -1083,14 +955,16 @@ jobs:
 
 
       # ========================================================
-      # FINAL PIPELINE STATUS
+      # STAGE 17 - FINAL PIPELINE STATUS
       #
-      # SKIPPED devices do NOT fail the workflow.
-      # FAILED device tests DO fail the workflow.
+      # SKIPPED devices DO NOT fail the workflow.
+      # Actual Appium failures DO fail the workflow.
       # ========================================================
-      - name: Final pipeline status
+
+      - name: STAGE 17 - Final pipeline status
         if: always()
         shell: bash
+
         run: |
           set -euo pipefail
 
@@ -1110,10 +984,13 @@ jobs:
           FAILED_COUNT="${FAILED_COUNT:-0}"
 
           if [ "$FAILED_COUNT" -gt 0 ]; then
+
             echo ""
             echo "PIPELINE RESULT: FAILED"
             echo "Actual failed device tests: $FAILED_COUNT"
+
             exit 1
+
           fi
 
           echo ""
