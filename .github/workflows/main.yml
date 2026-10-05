@@ -701,15 +701,44 @@ jobs:
             )"
 
             if [ -z "$RID" ] || [ "$RID" = "null" ]; then
-              DEVICE_STATUS="FAILED"
-              DEVICE_REASON="BOOKING_FAILED"
 
-              printf '%s\t%s\t%s\t%s\n' \
-                "$DEVICE_INDEX" "$DEVICE_NAME" \
-                "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
+              BOOK_ERROR="$(
+                jq -r '
+                  .result.error //
+                  .error //
+                  .message //
+                  empty
+                ' "$BOOK_RESPONSE_FILE" 2>/dev/null |
+                head -n 1
+              )"
 
-              echo "ERROR: Device booking failed"
-              continue
+              if printf '%s' "$BOOK_ERROR" |
+                 grep -qiE 'device[[:space:]_-]*not[[:space:]_-]*available|not available|unavailable'; then
+
+                echo "DEVICE SKIPPED"
+                echo "Device: $DEVICE_NAME"
+                echo "Reason: DEVICE_NOT_AVAILABLE"
+                echo "pCloudy booking response: $BOOK_ERROR"
+
+                DEVICE_STATUS="SKIPPED"
+                DEVICE_REASON="DEVICE_NOT_AVAILABLE"
+
+                printf '%s\t%s\t%s\t%s\n'                   "$DEVICE_INDEX" "$DEVICE_NAME"                   "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
+
+                continue
+
+              else
+
+                echo "ERROR: Device booking failed"
+                echo "pCloudy booking error: ${BOOK_ERROR:-UNKNOWN}"
+
+                DEVICE_STATUS="FAILED"
+                DEVICE_REASON="BOOKING_FAILED"
+
+                printf '%s\t%s\t%s\t%s\n'                   "$DEVICE_INDEX" "$DEVICE_NAME"                   "$DEVICE_STATUS" "$DEVICE_REASON" >> "$SUMMARY_FILE"
+
+                continue
+              fi
             fi
 
             echo "::add-mask::$RID"
@@ -1041,10 +1070,11 @@ jobs:
           if [ "$FAILED_COUNT" -gt 0 ]; then
             echo ""
             echo "PIPELINE RESULT: FAILED"
-            echo "Failed device tests: $FAILED_COUNT"
+            echo "Actual failed device tests: $FAILED_COUNT"
             exit 1
           fi
 
           echo ""
           echo "PIPELINE RESULT: SUCCESS"
-          echo "No device test failures."
+          echo "No actual device test failures."
+          echo "Unavailable devices are treated as SKIPPED."
