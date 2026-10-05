@@ -1,7 +1,7 @@
 import os
 import time
-
 import pytest
+
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
 
@@ -12,19 +12,17 @@ from appium.options.android import UiAutomator2Options
 
 APP_PACKAGE = os.getenv(
     "APP_PACKAGE",
-    "com.epam.mobitru",
+    "com.epam.mobitru"
 )
 
 DEVICE_NAME = os.getenv(
     "PCLOUDY_DEVICE",
-    "",
+    ""
 )
 
-# Optional legacy reservation support.
-# For the current Perf. Automation flow, PCLOUDY_DEVICE is used.
 RID = os.getenv(
     "RID",
-    "",
+    ""
 )
 
 PCLOUDY_EMAIL = os.environ["PCLOUDY_EMAIL"]
@@ -32,25 +30,27 @@ PCLOUDY_ACCESS_KEY = os.environ["PCLOUDY_ACCESS_KEY"]
 
 PCLOUDY_APP_NAME = os.getenv(
     "PCLOUDY_APP_NAME",
-    "firebase-app.apk",
+    "firebase-app.apk"
 )
 
-PCLOUDY_APPIUM_URL = os.getenv(
-    "PCLOUDY_APPIUM_URL",
-    "https://device.pcloudy.com/appiumcloud/wd/hub",
+PCLOUDY_APPIUM_URL = (
+    "https://device.pcloudy.com/appiumcloud/wd/hub"
 )
 
-PCLOUDY_DURATION = int(
-    os.getenv("PCLOUDY_DURATION", "5")
-)
 
-PERFORMANCE_DATA = (
-    os.getenv(
-        "PCLOUDY_ENABLE_PERFORMANCE_DATA",
-        "true",
-    ).lower()
-    == "true"
-)
+# ============================================================
+# Performance Data
+#
+# true  -> Performance data enabled
+# false -> Performance data disabled
+#
+# Default is true
+# ============================================================
+
+PERFORMANCE_DATA = os.getenv(
+    "PCLOUDY_ENABLE_PERFORMANCE_DATA",
+    "true"
+).lower() == "true"
 
 
 # ============================================================
@@ -58,20 +58,10 @@ PERFORMANCE_DATA = (
 # ============================================================
 
 def create_driver():
-    """
-    Create a pCloudy Appium Cloud session.
-
-    Important:
-    - This function does NOT perform manual booking.
-    - It creates the pCloudy Appium/Perf. Automation session
-      using pCloudy DeviceFullName.
-    - Any Appium session-creation failure is a TEST FAILURE.
-      It must not be converted into SKIPPED here.
-    """
 
     if not DEVICE_NAME and not RID:
         raise RuntimeError(
-            "PCLOUDY_DEVICE is empty and no RID was supplied."
+            "Both PCLOUDY_DEVICE and RID are empty"
         )
 
     options = UiAutomator2Options()
@@ -82,70 +72,68 @@ def create_driver():
 
     options.set_capability(
         "platformName",
-        "Android",
+        "Android"
     )
 
     options.set_capability(
         "appium:automationName",
-        "UiAutomator2",
+        "UiAutomator2"
     )
 
     options.set_capability(
         "appium:appPackage",
-        APP_PACKAGE,
+        APP_PACKAGE
     )
 
     options.set_capability(
         "appium:noReset",
-        False,
+        False
     )
 
     options.set_capability(
         "appium:autoGrantPermissions",
-        True,
+        True
     )
 
     options.set_capability(
         "appium:newCommandTimeout",
-        600,
+        600
     )
 
     options.set_capability(
         "appium:launchTimeout",
-        90000,
+        90000
     )
 
     # ========================================================
-    # pCloudy App Performance / Perf. Automation
+    # Appium Performance Capabilities
     # ========================================================
 
     options.set_capability(
         "appium:instrumentAppPerformance",
-        True,
+        True
     )
 
     options.set_capability(
         "appium:appPerformance",
-        True,
+        True
     )
 
     # ========================================================
-    # pCloudy Options
+    # Nested pCloudy Options (W3C Compliant)
     # ========================================================
 
     pcloudy_opts = {
         "pCloudy_Username": PCLOUDY_EMAIL,
         "pCloudy_ApiKey": PCLOUDY_ACCESS_KEY,
         "pCloudy_ApplicationName": PCLOUDY_APP_NAME,
-        "pCloudy_DurationInMinutes": PCLOUDY_DURATION,
+        "pCloudy_DurationInMinutes": 5,
         "pCloudy_EnableVideo": False,
         "pCloudy_EnablePerformanceData": PERFORMANCE_DATA,
         "pCloudy_EnableDeviceLogs": False,
-        "appiumVersion": "3.1.1",
+        "appiumVersion": "3.1.1"
     }
 
-    # Current workflow:
-    # devices.json -> PCLOUDY_DEVICE -> Perf. Automation
     if RID:
         pcloudy_opts["pCloudy_ReservationId"] = int(RID)
     else:
@@ -153,7 +141,7 @@ def create_driver():
 
     options.set_capability(
         "pcloudy:options",
-        pcloudy_opts,
+        pcloudy_opts
     )
 
     # ========================================================
@@ -165,18 +153,21 @@ def create_driver():
     print("Starting pCloudy Appium session")
     print("==========================================")
     print(f"Device           : {DEVICE_NAME}")
-
     if RID:
         print(f"Reservation ID   : {RID}")
-
     print(f"Package          : {APP_PACKAGE}")
-    print(f"Application      : {PCLOUDY_APP_NAME}")
-    print(f"Duration         : {PCLOUDY_DURATION} minutes")
-    print(f"Performance Data : {PERFORMANCE_DATA}")
-    print("Appium Instrument : True")
-    print("App Performance   : True")
-    print(f"Appium URL       : {PCLOUDY_APPIUM_URL}")
-    print("==========================================")
+    print(
+        f"Performance Data : {PERFORMANCE_DATA}"
+    )
+    print(
+        "Appium Instrument : True"
+    )
+    print(
+        "App Performance   : True"
+    )
+    print(
+        "=========================================="
+    )
 
     # ========================================================
     # Retry Appium Session
@@ -185,7 +176,9 @@ def create_driver():
     last_error = None
 
     for attempt in range(1, 4):
+
         try:
+
             print(
                 f"Creating pCloudy Appium session "
                 f"(attempt {attempt}/3)..."
@@ -193,75 +186,39 @@ def create_driver():
 
             driver = webdriver.Remote(
                 command_executor=PCLOUDY_APPIUM_URL,
-                options=options,
+                options=options
             )
 
-            print("")
-            print("==========================================")
-            print("PCLOUDY APPIUM SESSION CREATED")
-            print("==========================================")
-            print(f"Device: {DEVICE_NAME}")
-            print("Session type: Perf. Automation")
-            print("==========================================")
+            print(
+                "Appium session created successfully"
+            )
 
             return driver
 
         except Exception as exc:
+
             last_error = exc
-            error_text = str(exc)
 
-            print("")
             print(
-                f"Appium session attempt {attempt} failed:"
+                f"Appium session attempt "
+                f"{attempt} failed:"
             )
-            print(error_text)
 
-            if "ECONNREFUSED" in error_text:
-                print(
-                    "ERROR TYPE: PCLOUDY_APPIUM_CONNECTION_REFUSED"
-                )
-
-            elif "Requested device not available" in error_text:
-                print(
-                    "ERROR TYPE: "
-                    "PCLOUDY_APPIUM_DEVICE_SESSION_UNAVAILABLE"
-                )
-
-            else:
-                print(
-                    "ERROR TYPE: PCLOUDY_APPIUM_SESSION_ERROR"
-                )
+            print(str(exc))
 
             if attempt < 3:
+
                 print(
-                    "Waiting 15 seconds before retry..."
+                    "Waiting 15 seconds "
+                    "before retry..."
                 )
+
                 time.sleep(15)
 
-    # ========================================================
-    # IMPORTANT:
-    # Never mark this as SKIPPED here.
-    #
-    # Stage 9 already determines whether the device was
-    # available before this test starts.
-    #
-    # If Appium session creation fails here, this device
-    # has FAILED its Perf. Automation run.
-    # ========================================================
-
-    print("")
-    print("==========================================")
-    print("APPIUM SESSION FAILED")
-    print("==========================================")
-    print(f"Device: {DEVICE_NAME}")
-    print(f"Last error: {last_error}")
-    print("==========================================")
-
     raise RuntimeError(
-        "APPIUM_SESSION_FAILED: "
-        "Could not create pCloudy Appium session "
-        f"after 3 attempts for device: {DEVICE_NAME}. "
-        f"Last error: {last_error}"
+        "Could not create pCloudy Appium "
+        "session after 3 attempts "
+        f"for device: {DEVICE_NAME}"
     ) from last_error
 
 
@@ -275,6 +232,7 @@ def test_app_lifecycle():
     driver = None
 
     try:
+
         # ====================================================
         # Create Appium Session
         # ====================================================
@@ -287,19 +245,27 @@ def test_app_lifecycle():
         print("==========================================")
         print(f"Device           : {DEVICE_NAME}")
         print(f"Package          : {APP_PACKAGE}")
-        print(f"Performance Data : {PERFORMANCE_DATA}")
-        print("Appium Instrument : True")
-        print("App Performance   : True")
-        print("==========================================")
+        print(
+            f"Performance Data : {PERFORMANCE_DATA}"
+        )
+        print(
+            "Appium Instrument : True"
+        )
+        print(
+            "App Performance   : True"
+        )
+        print(
+            "=========================================="
+        )
 
         # ====================================================
         # 1. Launch Application
         # ====================================================
 
         print("")
-        print("Step 1: Launching application")
-
-        driver.activate_app(APP_PACKAGE)
+        print(
+            "Step 1: Launching application"
+        )
 
         time.sleep(10)
 
@@ -439,6 +405,7 @@ def test_app_lifecycle():
             # =================================================
 
             try:
+
                 report_link = driver.execute_script(
                     "Pcloudy_getReportLink"
                 )
@@ -456,12 +423,11 @@ def test_app_lifecycle():
                 )
                 print("")
 
-            except Exception as report_exc:
+            except Exception as r_exc:
 
                 print(
                     "Warning: Could not retrieve "
-                    "report link programmatically: "
-                    f"{report_exc}"
+                    f"report link programmatically: {r_exc}"
                 )
 
             # =================================================
@@ -469,15 +435,16 @@ def test_app_lifecycle():
             # =================================================
 
             try:
+
                 driver.quit()
 
                 print(
                     "Appium session closed successfully"
                 )
 
-            except Exception as close_exc:
+            except Exception as exc:
 
                 print(
                     "Warning while closing "
-                    f"Appium session: {close_exc}"
+                    f"Appium session: {exc}"
                 )
