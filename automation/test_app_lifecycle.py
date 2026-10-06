@@ -401,34 +401,12 @@ def test_app_lifecycle():
             )
 
             # =================================================
-            # Retrieve pCloudy Report Link
+            # Report Link Note
             # =================================================
-
-            try:
-
-                report_link = driver.execute_script(
-                    "Pcloudy_getReportLink"
-                )
-
-                print("")
-                print(
-                    "=================================================="
-                )
-                print(
-                    "PCLOUDY LIVE PERFORMANCE REPORT LINK:"
-                )
-                print(report_link)
-                print(
-                    "=================================================="
-                )
-                print("")
-
-            except Exception as r_exc:
-
-                print(
-                    "Warning: Could not retrieve "
-                    f"report link programmatically: {r_exc}"
-                )
+            # The pCloudy report-link command is not implemented by the
+            # current Android UIAutomator2 driver. Do not call it
+            # through execute_script; check the pCloudy dashboard
+            # for the session report instead.
 
             # =================================================
             # Quit Appium Session
