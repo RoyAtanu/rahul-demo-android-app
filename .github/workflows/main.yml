@@ -21,7 +21,7 @@ jobs:
     name: Stage 1 - Checkout Repository
     runs-on: ubuntu-latest
     steps:
-      - name: STAGE 1 - Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
 
@@ -30,14 +30,14 @@ jobs:
       # ========================================================
 
   firebase_pipeline:
-    name: Stage 2 - Firebase Authentication and APK Download
+    name: Firebase Authentication and APK Download
     runs-on: ubuntu-latest
     needs: checkout
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: STAGE 2 - Firebase Authentication
+      - name: Firebase Authentication
         uses: google-github-actions/auth@v2
 
         with:
@@ -218,7 +218,7 @@ jobs:
       # STAGE 6 - VERIFY APK
       # ========================================================
 
-      - name: Stage 2 - Upload APK artifact for next job
+      - name: Upload APK artifact for next job
         uses: actions/upload-artifact@v4
         with:
           name: firebase-apk
@@ -238,14 +238,14 @@ jobs:
         with:
           name: firebase-apk
           path: .
-      - name: STAGE 3 - Verify APK
+      - name: Verify APK
         shell: bash
 
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 3 - Verify APK"
+          echo "Verify APK"
           echo "=========================================="
 
           file firebase-app.apk
@@ -273,7 +273,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: STAGE 4 - pCloudy Authentication
+      - name: pCloudy Authentication
         id: pcloudy-auth
         shell: bash
 
@@ -285,7 +285,7 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 4 - pCloudy Authentication"
+          echo "pCloudy Authentication"
           echo "=========================================="
 
           if [ -z "$PCLOUDY_EMAIL" ]; then
@@ -402,7 +402,7 @@ jobs:
       # STAGE 8 - DEVICE LIST
       # ========================================================
 
-      - name: STAGE 5 - Fetch Target Devices
+      - name: Fetch Target Devices
         shell: bash
 
         env:
@@ -412,7 +412,7 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 5 - Target Device List"
+          echo "Target Device List"
           echo "=========================================="
 
           RESPONSE="$(
@@ -453,14 +453,14 @@ jobs:
       # STAGE 9 - DEVICE VALIDATION
       # ========================================================
 
-      - name: STAGE 5 - Validate Target Devices
+      - name: Validate Target Devices
         shell: bash
 
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 5 - Validate Target Devices"
+          echo "Validate Target Devices"
           echo "=========================================="
 
           DEVICES_FILE="config/devices.json"
@@ -569,7 +569,7 @@ jobs:
       # STAGE 8 - DEVICE LIST
       # ========================================================
 
-      - name: STAGE 6 - Upload APK to pCloudy
+      - name: Upload APK to pCloudy
         id: pcloudy-upload
         shell: bash
 
@@ -580,7 +580,7 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 6 - Upload APK to pCloudy"
+          echo "Upload APK to pCloudy"
           echo "=========================================="
 
           HTTP_CODE="$(
@@ -728,7 +728,7 @@ jobs:
       # STAGE 8 - DEVICE LIST
       # ========================================================
 
-      - name: STAGE 7 - Execute Tests on Devices - Setup Python
+      - name: Execute Tests on Devices - Setup Python
         uses: actions/setup-python@v5
 
         with:
@@ -739,14 +739,14 @@ jobs:
       # STAGE 11 - INSTALL APPIUM DEPENDENCIES
       # ========================================================
 
-      - name: STAGE 7 - Execute Tests on Devices - Install Dependencies
+      - name: Execute Tests on Devices - Install Dependencies
         shell: bash
 
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 11 - Appium Dependencies"
+          echo "Appium Dependencies"
           echo "=========================================="
 
           python -m pip install --upgrade pip
@@ -767,7 +767,7 @@ jobs:
       # STAGE 11 - SEQUENTIAL APPIUM AUTOMATION
       # ========================================================
 
-      - name: STAGE 7 - Execute Tests on Devices - Run Sequential Tests
+      - name: Execute Tests on Devices - Run Sequential Tests
         id: appium-test
         shell: bash
 
@@ -786,7 +786,7 @@ jobs:
           set -uo pipefail
 
           echo "=========================================="
-          echo "STAGE 7 - Execute Tests on Devices"
+          echo "Execute Tests on Devices"
           echo "=========================================="
 
           if [ -z "${PCLOUDY_APPLICATION_NAME:-}" ]; then
@@ -951,7 +951,7 @@ jobs:
       # STAGE 12 - PERFORMANCE RESULTS
       # ========================================================
 
-      - name: STAGE 7 - Execute Tests on Devices - Collect Results
+      - name: Execute Tests on Devices - Collect Results
         if: always()
         shell: bash
 
@@ -959,7 +959,7 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 7 - Collect per-device results"
+          echo "Collect per-device results"
           echo "=========================================="
 
           mkdir -p performance-results device-results
@@ -980,7 +980,7 @@ jobs:
       # STAGE 13 - UPLOAD RESULTS
       # ========================================================
 
-      - name: STAGE 7 - Execute Tests on Devices - Upload Artifacts
+      - name: Execute Tests on Devices - Upload Artifacts
         if: always()
         uses: actions/upload-artifact@v4
 
