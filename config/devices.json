@@ -7,6 +7,10 @@
     {
       "name": "Samsung_GalaxyS25Ultra_Android_15.0.0_2b0fc",
       "enabled": true
+    },
+    {
+      "name": "XYZ",
+      "enabled": true
     }
   ]
 }
