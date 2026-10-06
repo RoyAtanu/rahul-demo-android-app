@@ -533,6 +533,7 @@ jobs:
         env:
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
           PCLOUDY_APPLICATION_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
           PCLOUDY_APP_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
           APP_PACKAGE: ${{ env.APP_PACKAGE }}
@@ -575,12 +576,36 @@ jobs:
             echo "DEVICE ${TOTAL}: ${DEVICE_NAME}"
             echo "=========================================="
 
+            # Refresh the device list immediately before each test; Stage 8 is only a snapshot.
+            CURRENT_DEVICES_FILE="performance-results/${SAFE_NAME}-availability.json"
+            if ! curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --retry 2 \
+              --retry-delay 2 \
+              --connect-timeout 20 \
+              --max-time 60 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "{\"token\":\"${PCLOUDY_TOKEN}\",\"duration\":${PCLOUDY_DURATION},\"platform\":\"Android\",\"available_now\":true}" \
+              "https://device.pcloudy.com/api/devices" \
+              --output "$CURRENT_DEVICES_FILE"; then
+              STATUS="FAILED"
+              REASON="DEVICE_AVAILABILITY_CHECK_FAILED"
+              FAILED=$((FAILED + 1))
+              printf '%s\t%s\t%s\n' "$DEVICE_NAME" "$STATUS" "$REASON" >> "$SUMMARY_FILE"
+              printf '%s | %s | %s\n' "$DEVICE_NAME" "$STATUS" "$REASON" | tee -a device-results/device-results.log
+              echo "Could not verify current availability; not misclassifying this as a skip. Continuing to next device."
+              continue
+            fi
+
             FOUND="$(jq -r --arg DEVICE "$DEVICE_NAME" '
               .result.models[]?
               | select(.full_name == $DEVICE and .available == true)
               | select((.platform // "" | ascii_downcase) == "android")
               | .full_name
-            ' pcloudy-devices.json | head -n 1)"
+            ' "$CURRENT_DEVICES_FILE" | head -n 1)"
 
             if [ -z "$FOUND" ]; then
               STATUS="SKIPPED"
@@ -592,7 +617,7 @@ jobs:
               continue
             fi
 
-            echo "Device is available. Starting Appium lifecycle test."
+            echo "Device is available on fresh pre-check. Starting Appium lifecycle test."
             set +e
             PCLOUDY_DEVICE="$DEVICE_NAME" \
             pytest \
@@ -608,15 +633,28 @@ jobs:
               REASON="PERF_AUTOMATION_COMPLETED"
               PASSED=$((PASSED + 1))
             else
-              STATUS="FAILED"
-              if grep -qi "ECONNREFUSED" "$LOG_FILE"; then
-                REASON="APPIUM_SESSION_CONNECTION_REFUSED"
-              elif grep -qi "APPIUM_SESSION_FAILED\|Could not create pCloudy Appium session\|Requested device not available" "$LOG_FILE"; then
-                REASON="APPIUM_SESSION_FAILED"
+              # A device can become unavailable after the pre-check. Skip only an
+              # explicit availability error; performance capability errors and
+              # connection failures remain FAILED so they are not hidden.
+              if grep -qi "Ensure Android >=13 or iOS >=15 for appPerformance" "$LOG_FILE"; then
+                STATUS="FAILED"
+                REASON="APPIUM_PERFORMANCE_CAPABILITY_ERROR"
+                FAILED=$((FAILED + 1))
+              elif grep -qi "Requested device not available\|device is not available\|device not available" "$LOG_FILE"; then
+                STATUS="SKIPPED"
+                REASON="DEVICE_NOT_AVAILABLE_DURING_SESSION"
+                SKIPPED=$((SKIPPED + 1))
               else
-                REASON="APPIUM_TEST_FAILED"
+                STATUS="FAILED"
+                if grep -qi "ECONNREFUSED" "$LOG_FILE"; then
+                  REASON="APPIUM_SESSION_CONNECTION_REFUSED"
+                elif grep -qi "APPIUM_SESSION_FAILED\|Could not create pCloudy Appium session" "$LOG_FILE"; then
+                  REASON="APPIUM_SESSION_FAILED"
+                else
+                  REASON="APPIUM_TEST_FAILED"
+                fi
+                FAILED=$((FAILED + 1))
               fi
-              FAILED=$((FAILED + 1))
             fi
 
             printf '%s\t%s\t%s\n' "$DEVICE_NAME" "$STATUS" "$REASON" >> "$SUMMARY_FILE"
@@ -624,22 +662,48 @@ jobs:
             echo "Device session/test finished. Moving to the next device."
           done < <(jq -r '.devices[]? | select(.enabled == true) | .name' config/devices.json)
 
+          if [ "$FAILED" -gt 0 ]; then
+            FINAL_STATUS="FAILED"
+          elif [ "$PASSED" -eq 0 ] && [ "$SKIPPED" -gt 0 ]; then
+            FINAL_STATUS="NO_TESTS_EXECUTED"
+          elif [ "$PASSED" -eq 0 ]; then
+            FINAL_STATUS="NO_TESTS_EXECUTED"
+          else
+            FINAL_STATUS="SUCCESS"
+          fi
+
           {
+            echo "Final status: $FINAL_STATUS"
             echo "Total enabled devices: $TOTAL"
             echo "Passed: $PASSED"
             echo "Failed: $FAILED"
-            echo "Skipped (unavailable at precheck): $SKIPPED"
+            echo "Skipped: $SKIPPED"
           } | tee device-results/final-summary.txt
+
+          {
+            echo "## pCloudy multi-device test summary"
+            echo ""
+            echo "- **Final status:** $FINAL_STATUS"
+            echo "- **Enabled devices:** $TOTAL"
+            echo "- **Passed:** $PASSED"
+            echo "- **Failed:** $FAILED"
+            echo "- **Skipped:** $SKIPPED"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           echo ""
           echo "Per-device summary:"
           column -t -s $'\t' "$SUMMARY_FILE" || cat "$SUMMARY_FILE"
 
-          # Fail only after every enabled device has had its turn.
+          # Never report a green run when no device test actually executed.
           if [ "$FAILED" -gt 0 ]; then
-            echo "One or more device tests failed; all configured devices were still processed."
+            echo "FINAL_STATUS=FAILED: one or more device tests failed. All enabled devices were processed."
+            exit 1
+          elif [ "$PASSED" -eq 0 ]; then
+            echo "FINAL_STATUS=NO_TESTS_EXECUTED: all enabled devices were skipped or no tests ran."
             exit 1
           fi
+
+          echo "FINAL_STATUS=SUCCESS: at least one test passed and no tests failed."
 
 
       # ========================================================
