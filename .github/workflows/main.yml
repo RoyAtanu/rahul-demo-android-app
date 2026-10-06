@@ -1,4 +1,4 @@
-name: Android - Firebase to pCloudy Appium
+name: Android - Firebase to pCloudy Appium Performance
 
 on:
   push:
@@ -10,48 +10,54 @@ on:
 permissions:
   contents: read
 
+env:
+  APP_PACKAGE: com.epam.mobitru
+  PCLOUDY_DURATION: 30
+  PCLOUDY_APPIUM_URL: https://device.pcloudy.com/appiumcloud/wd/hub
+  PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
+  PCLOUDY_APP_NAME: firebase-app.apk
+  PYTHONUNBUFFERED: "1"
 
 jobs:
 
+  # ============================================================
+  # STAGE 1 - CHECKOUT
+  # ============================================================
+
   appium-pcloudy:
 
-    name: Firebase → pCloudy → Device List → Appium
+    name: Firebase → pCloudy → Install → Performance → Appium
 
     runs-on: ubuntu-latest
 
     steps:
 
-      # ==================================================
+      # ========================================================
       # STAGE 1 - Checkout
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 1 - Checkout repository
         uses: actions/checkout@v4
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 2 - Firebase Authentication
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 2 - Authenticate with Firebase
         uses: google-github-actions/auth@v2
-
         with:
           credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 3 - Firebase Access Token
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 3 - Get Firebase access token
-
         id: firebase-token
-
         shell: bash
-
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
@@ -61,11 +67,8 @@ jobs:
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
 
           if [ -z "$ACCESS_TOKEN" ]; then
-
             echo "ERROR: Firebase access token is empty"
-
             exit 1
-
           fi
 
           echo "::add-mask::$ACCESS_TOKEN"
@@ -75,98 +78,66 @@ jobs:
           echo "Firebase authentication successful"
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 4 - Get Latest Firebase Release
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 4 - Get latest Firebase Android release
-
         id: firebase-release
-
         shell: bash
 
         env:
-
           FIREBASE_PROJECT_NUMBER: ${{ secrets.FIREBASE_PROJECT_NUMBER }}
-
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-
           ACCESS_TOKEN: ${{ steps.firebase-token.outputs.access_token }}
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
           echo "STAGE 4 - Getting latest Firebase release"
           echo "=========================================="
 
-
           PROJECT_NUMBER="$(
             printf '%s' "$FIREBASE_PROJECT_NUMBER" |
             tr -d '[:space:]'
           )"
-
 
           APP_ID="$(
             printf '%s' "$FIREBASE_APP_ID" |
             tr -d '[:space:]'
           )"
 
-
           if [ -z "$PROJECT_NUMBER" ]; then
-
             echo "ERROR: FIREBASE_PROJECT_NUMBER is empty"
-
             exit 1
-
           fi
-
 
           if ! [[ "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]; then
-
             echo "ERROR: FIREBASE_PROJECT_NUMBER must contain only numbers"
-
             exit 1
-
           fi
-
 
           if [ -z "$APP_ID" ]; then
-
             echo "ERROR: FIREBASE_APP_ID is empty"
-
             exit 1
-
           fi
-
 
           if [[ "$APP_ID" != *":android:"* ]]; then
-
             echo "ERROR: FIREBASE_APP_ID does not look like an Android Firebase App ID"
-
             exit 1
-
           fi
-
 
           if [ -z "$ACCESS_TOKEN" ]; then
-
             echo "ERROR: Firebase access token is empty"
-
             exit 1
-
           fi
-
 
           echo "::add-mask::$ACCESS_TOKEN"
 
-
           API_URL="https://firebaseappdistribution.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${APP_ID}/releases"
 
-
           echo "Calling Firebase App Distribution API..."
-
 
           RESPONSE="$(
             curl \
@@ -181,43 +152,29 @@ jobs:
               --data-urlencode "orderBy=createTime desc"
           )"
 
-
           printf '%s\n' "$RESPONSE" > firebase-release.json
 
-
           if ! printf '%s' "$RESPONSE" | jq empty >/dev/null 2>&1; then
-
             echo "ERROR: Firebase returned invalid JSON"
-
             cat firebase-release.json
-
             exit 1
-
           fi
-
 
           DOWNLOAD_URL="$(
             printf '%s' "$RESPONSE" |
             jq -r '.releases[0].binaryDownloadUri // empty'
           )"
 
-
           RELEASE_NAME="$(
             printf '%s' "$RESPONSE" |
             jq -r '.releases[0].name // empty'
           )"
 
-
           if [ -z "$DOWNLOAD_URL" ]; then
-
             echo "ERROR: No Firebase Android release found"
-
             cat firebase-release.json
-
             exit 1
-
           fi
-
 
           echo ""
           echo "=========================================="
@@ -227,226 +184,187 @@ jobs:
           echo "Release:"
           echo "$RELEASE_NAME"
 
-
           echo "::add-mask::$DOWNLOAD_URL"
 
           echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 5 - Download Firebase APK
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 5 - Download APK from Firebase
-
         shell: bash
 
         env:
-
           DOWNLOAD_URL: ${{ steps.firebase-release.outputs.download_url }}
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 5 - Downloading existing Firebase APK"
+          echo "STAGE 5 - Downloading Firebase APK"
           echo "=========================================="
 
-
           if [ -z "$DOWNLOAD_URL" ]; then
-
             echo "ERROR: Firebase download URL is empty"
-
             exit 1
-
           fi
-
 
           curl \
             --fail-with-body \
             --location \
             --silent \
             --show-error \
-            --retry 3 \
-            --retry-delay 2 \
+            --retry 5 \
+            --retry-delay 3 \
+            --retry-all-errors \
+            --connect-timeout 30 \
+            --max-time 300 \
             "$DOWNLOAD_URL" \
             --output firebase-app.apk
 
-
           if [ ! -s firebase-app.apk ]; then
-
             echo "ERROR: APK download failed"
-
             exit 1
-
           fi
-
 
           echo "Firebase APK downloaded successfully"
 
           ls -lh firebase-app.apk
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 6 - Verify APK
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 6 - Verify APK
-
         shell: bash
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
           echo "STAGE 6 - Verifying APK"
           echo "=========================================="
 
-
           file firebase-app.apk
-
 
           APK_SIZE="$(stat -c%s firebase-app.apk)"
 
-
           if [ "$APK_SIZE" -le 0 ]; then
-
             echo "ERROR: APK is empty"
-
             exit 1
-
           fi
-
 
           echo "APK size: ${APK_SIZE} bytes"
 
           echo "APK verification successful"
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 7 - pCloudy Authentication
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 7 - Authenticate with pCloudy
-
         id: pcloudy-auth
-
         shell: bash
 
         env:
-
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
-
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
           echo "STAGE 7 - pCloudy Authentication"
           echo "=========================================="
 
-
           if [ -z "$PCLOUDY_EMAIL" ]; then
-
             echo "ERROR: PCLOUDY_EMAIL is empty"
-
             exit 1
-
           fi
-
 
           if [ -z "$PCLOUDY_ACCESS_KEY" ]; then
-
             echo "ERROR: PCLOUDY_ACCESS_KEY is empty"
-
             exit 1
-
           fi
-
 
           RESPONSE="$(
             curl \
               --silent \
               --show-error \
               --fail-with-body \
+              --retry 5 \
+              --retry-delay 3 \
+              --retry-all-errors \
               -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
               "https://device.pcloudy.com/api/access"
           )"
 
+          printf '%s\n' "$RESPONSE" > pcloudy-auth.json
 
           TOKEN="$(
             printf '%s' "$RESPONSE" |
             jq -r '.result.token // empty'
           )"
 
-
           if [ -z "$TOKEN" ]; then
-
             echo "ERROR: Could not extract pCloudy token"
-
+            cat pcloudy-auth.json
             exit 1
-
           fi
-
 
           echo "::add-mask::$TOKEN"
 
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
-
           echo "pCloudy authentication successful"
 
 
-      # ==================================================
+      # ========================================================
       # STAGE 8 - Get pCloudy Android Devices
-      # ==================================================
+      # ========================================================
 
       - name: STAGE 8 - Get pCloudy device list
-
         shell: bash
 
         env:
-
           PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
           echo "STAGE 8 - Getting pCloudy Android devices"
           echo "=========================================="
 
-
           RESPONSE="$(
             curl \
               --silent \
               --show-error \
               --fail-with-body \
+              --retry 5 \
+              --retry-delay 3 \
+              --retry-all-errors \
               --request POST \
               --header "Content-Type: application/json" \
               --data "{
                 \"token\":\"${PCLOUDY_TOKEN}\",
-                \"duration\":15,
+                \"duration\":30,
                 \"platform\":\"Android\",
                 \"available_now\":true
               }" \
               "https://device.pcloudy.com/api/devices"
           )"
 
-
           printf '%s\n' "$RESPONSE" > pcloudy-devices.json
-
 
           echo ""
           echo "=========================================="
           echo "Available Android Devices"
           echo "=========================================="
-
 
           jq -r '
             .result.models[]?
@@ -458,43 +376,29 @@ jobs:
           ' pcloudy-devices.json || true
 
 
-      # ==================================================
-      # STAGE 9 - Validate Customer devices.json
-      # ==================================================
+      # ========================================================
+      # STAGE 9 - Validate config/devices.json
+      # ========================================================
 
-      - name: STAGE 9 - Validate customer devices.json
-
+      - name: STAGE 9 - Validate configured devices
         id: selected-device
-
         shell: bash
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 9 - Validating customer devices.json"
+          echo "STAGE 9 - Validating configured devices"
           echo "=========================================="
-
 
           DEVICES_FILE="config/devices.json"
 
-
           if [ ! -f "$DEVICES_FILE" ]; then
-
             echo "ERROR: $DEVICES_FILE not found"
-
             exit 1
-
           fi
 
-
-          echo "Configuration file:"
-          echo "$DEVICES_FILE"
-
-
           jq empty "$DEVICES_FILE"
-
 
           DEVICE_COUNT="$(
             jq '
@@ -506,31 +410,18 @@ jobs:
             ' "$DEVICES_FILE"
           )"
 
-
           if [ "$DEVICE_COUNT" -eq 0 ]; then
-
             echo "ERROR: No enabled devices found"
-
             exit 1
-
           fi
-
 
           echo ""
           echo "Configured enabled devices:"
-          echo ""
-
-
           jq -r '
             .devices[]?
             | select(.enabled == true)
             | .name
           ' "$DEVICES_FILE"
-
-
-          # --------------------------------------------------
-          # Currently configured device
-          # --------------------------------------------------
 
           DEVICE_NAME="$(
             jq -r '
@@ -541,24 +432,14 @@ jobs:
             head -n 1
           )"
 
-
           if [ -z "$DEVICE_NAME" ]; then
-
             echo "ERROR: Device name is empty"
-
             exit 1
-
           fi
-
 
           echo ""
           echo "Requested device:"
           echo "$DEVICE_NAME"
-
-
-          # --------------------------------------------------
-          # Verify exact device exists and is available
-          # --------------------------------------------------
 
           FOUND="$(
             jq -r \
@@ -575,16 +456,12 @@ jobs:
             head -n 1
           )"
 
-
           if [ -z "$FOUND" ]; then
-
             echo ""
             echo "ERROR: Requested device is not currently available"
-
             echo ""
             echo "Requested:"
             echo "$DEVICE_NAME"
-
             echo ""
             echo "Available Android devices:"
 
@@ -598,9 +475,7 @@ jobs:
             ' pcloudy-devices.json
 
             exit 1
-
           fi
-
 
           echo ""
           echo "=========================================="
@@ -609,174 +484,491 @@ jobs:
 
           echo "$FOUND"
 
-
-          # Save exact device for Appium
-
           echo "device=$FOUND" >> "$GITHUB_OUTPUT"
 
 
-      # ==================================================
-      # STAGE 10 - Upload APK to pCloudy
-      # ==================================================
+      # ========================================================
+      # STAGE 10 - Upload APK
+      # ========================================================
 
       - name: STAGE 10 - Upload APK to pCloudy
-
+        id: pcloudy-upload
         shell: bash
 
         env:
-
           PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
           echo "STAGE 10 - Uploading APK to pCloudy"
           echo "=========================================="
 
-
           HTTP_CODE="$(
             curl \
+              --http1.1 \
               --silent \
               --show-error \
+              --location \
+              --retry 5 \
+              --retry-delay 5 \
+              --retry-all-errors \
+              --connect-timeout 30 \
+              --max-time 300 \
               --output pcloudy-upload.json \
               --write-out "%{http_code}" \
               --request POST \
-              -F "file=@firebase-app.apk" \
-              -F "source_type=raw" \
-              -F "token=${PCLOUDY_TOKEN}" \
-              -F "filter=all" \
+              --form "file=@firebase-app.apk" \
+              --form "source_type=raw" \
+              --form "token=${PCLOUDY_TOKEN}" \
+              --form "filter=all" \
               "https://device.pcloudy.com/api/upload_file"
           )"
 
-
           echo "pCloudy upload HTTP status: ${HTTP_CODE}"
 
-
-          if [ "$HTTP_CODE" != "200" ]; then
-
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "ERROR: pCloudy APK upload failed"
-
             cat pcloudy-upload.json
-
             exit 1
-
           fi
 
+          echo ""
+          echo "Upload response:"
+          cat pcloudy-upload.json
+
+          UPLOAD_FILENAME="$(
+            jq -r '
+              .result.file //
+              .result.file_name //
+              .result.filename //
+              .result.fileName //
+              .result.application_name //
+              .result.applicationName //
+              .result.name //
+              .file //
+              empty
+            ' pcloudy-upload.json |
+            head -n 1
+          )"
+
+          if [ -z "$UPLOAD_FILENAME" ] || [ "$UPLOAD_FILENAME" = "null" ]; then
+            echo "ERROR: Failed to extract uploaded filename from pCloudy response"
+            cat pcloudy-upload.json
+            exit 1
+          fi
+
+          echo ""
+          echo "pCloudy application filename:"
+          echo "$UPLOAD_FILENAME"
+
+          echo "filename=$UPLOAD_FILENAME" >> "$GITHUB_OUTPUT"
 
           echo ""
           echo "pCloudy APK upload successful"
 
 
-          echo ""
-          echo "Upload response:"
+      # ========================================================
+      # STAGE 11 - Book Device
+      # ========================================================
 
-          cat pcloudy-upload.json
-
-
-      # ==================================================
-      # STAGE 11 - Setup Python
-      # ==================================================
-
-      - name: STAGE 11 - Setup Python
-
-        uses: actions/setup-python@v5
-
-        with:
-
-          python-version: "3.12"
-
-
-      # ==================================================
-      # STAGE 12 - Install Appium Dependencies
-      # ==================================================
-
-      - name: STAGE 12 - Install Appium dependencies
-
-        shell: bash
-
-        run: |
-
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "STAGE 12 - Installing Appium dependencies"
-          echo "=========================================="
-
-
-          python -m pip install --upgrade pip
-
-
-          if [ ! -f requirements.txt ]; then
-
-            echo "ERROR: requirements.txt not found"
-
-            exit 1
-
-          fi
-
-
-          pip install -r requirements.txt
-
-
-          echo ""
-          echo "Installed packages:"
-
-          pip list
-
-
-      # ==================================================
-      # STAGE 13 - Run Appium Test
-      # ==================================================
-
-      - name: STAGE 13 - Run Android Appium lifecycle test
-
+      - name: STAGE 11 - Book pCloudy device
+        id: book-device
         shell: bash
 
         env:
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
+          PCLOUDY_DEVICE: ${{ steps.selected-device.outputs.device }}
 
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 11 - Booking pCloudy Device"
+          echo "=========================================="
+
+          echo "Device:"
+          echo "$PCLOUDY_DEVICE"
+
+          DEVICE_ID="$(
+            jq -r \
+              --arg DEVICE "$PCLOUDY_DEVICE" '
+                .result.models[]?
+                | select(.full_name == $DEVICE)
+                | .id
+              ' \
+              pcloudy-devices.json |
+            head -n 1
+          )"
+
+          if [ -z "$DEVICE_ID" ] || [ "$DEVICE_ID" = "null" ]; then
+            echo "ERROR: Could not find device ID"
+            exit 1
+          fi
+
+          echo "Device ID:"
+          echo "$DEVICE_ID"
+
+          BOOK_PAYLOAD="$(
+            jq -n \
+              --arg token "$PCLOUDY_TOKEN" \
+              --arg id "$DEVICE_ID" \
+              --argjson duration "$PCLOUDY_DURATION" \
+              '{
+                token: $token,
+                id: $id,
+                duration: $duration
+              }'
+          )"
+
+          echo ""
+          echo "Booking request:"
+          echo "$BOOK_PAYLOAD" | jq 'del(.token)'
+
+          BOOK_RESPONSE="$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 3 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$BOOK_PAYLOAD" \
+              "https://device.pcloudy.com/api/book_device"
+          )"
+
+          printf '%s\n' "$BOOK_RESPONSE" > pcloudy-book-device.json
+
+          echo ""
+          echo "Booking response:"
+          echo "$BOOK_RESPONSE" | jq '.' || cat pcloudy-book-device.json
+
+          RID="$(
+            printf '%s' "$BOOK_RESPONSE" |
+            jq -r '
+              .result.rid //
+              .result.reservation_id //
+              .result.reservationId //
+              .result.id //
+              .rid //
+              .reservation_id //
+              .reservationId //
+              empty
+            ' |
+            head -n 1
+          )"
+
+          if [ -z "$RID" ] || [ "$RID" = "null" ]; then
+            echo ""
+            echo "ERROR: Reservation ID was not returned."
+            echo ""
+            echo "Full booking response:"
+            cat pcloudy-book-device.json
+            exit 1
+          fi
+
+          echo ""
+          echo "Reservation ID:"
+          echo "$RID"
+
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+          echo "rid=$RID" >> "$GITHUB_OUTPUT"
+
+
+            # ========================================================
+      # STAGE 12 - Install APK using pCloudy V2 API
+      # ========================================================
+
+      - name: STAGE 12 - Install APK on pCloudy device
+        id: install-app
+        shell: bash
+
+        env:
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
+          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
+          RID: ${{ steps.book-device.outputs.rid }}
+          UPLOAD_FILENAME: ${{ steps.pcloudy-upload.outputs.filename }}
 
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 12 - Installing APK"
+          echo "=========================================="
+
+          echo "Reservation ID:"
+          echo "$RID"
+
+          echo "Filename:"
+          echo "$UPLOAD_FILENAME"
+
+          if [ -z "$RID" ]; then
+            echo "ERROR: Reservation ID is empty"
+            exit 1
+          fi
+
+          if [ -z "$PCLOUDY_TOKEN" ]; then
+            echo "ERROR: pCloudy token is empty"
+            exit 1
+          fi
+
+          if [ -z "$UPLOAD_FILENAME" ]; then
+            echo "ERROR: Uploaded filename is empty"
+            exit 1
+          fi
+
+          echo "::add-mask::$PCLOUDY_TOKEN"
+          echo "::add-mask::$PCLOUDY_ACCESS_KEY"
+
+          echo ""
+          echo "Install request:"
+
+          jq -n \
+            --arg token "$PCLOUDY_TOKEN" \
+            --argjson rid "$RID" \
+            --arg filename "$UPLOAD_FILENAME" \
+            '{
+              token: $token,
+              rid: $rid,
+              filename: $filename
+            }' | jq 'del(.token)'
+
+          INSTALL_PAYLOAD="$(
+            jq -n \
+              --arg token "$PCLOUDY_TOKEN" \
+              --argjson rid "$RID" \
+              --arg filename "$UPLOAD_FILENAME" \
+              '{
+                token: $token,
+                rid: $rid,
+                filename: $filename
+              }'
+          )"
+
+          echo ""
+          echo "Calling pCloudy Install API..."
+
+          HTTP_CODE="$(
+            curl \
+              --http1.1 \
+              --silent \
+              --show-error \
+              --output pcloudy-install-app.json \
+              --write-out "%{http_code}" \
+              --request POST \
+              --header "token: ${PCLOUDY_TOKEN}" \
+              --header "Content-Type: application/json" \
+              --data "$INSTALL_PAYLOAD" \
+              "https://device.pcloudy.com/api/v2/install_app"
+          )"
+
+          if [ "$HTTP_CODE" -eq 404 ] || [ "$HTTP_CODE" -ge 400 ]; then
+            echo "v2 install returned HTTP $HTTP_CODE, trying fallback to /api/install_app..."
+            HTTP_CODE="$(
+              curl \
+                --http1.1 \
+                --silent \
+                --show-error \
+                --output pcloudy-install-app.json \
+                --write-out "%{http_code}" \
+                --request POST \
+                --header "token: ${PCLOUDY_TOKEN}" \
+                --header "Content-Type: application/json" \
+                --data "$INSTALL_PAYLOAD" \
+                "https://device.pcloudy.com/api/install_app"
+            )"
+          fi
+
+          echo ""
+          echo "HTTP Status:"
+          echo "$HTTP_CODE"
+
+          echo ""
+          echo "Install response:"
+          cat pcloudy-install-app.json | jq '.' \
+            || cat pcloudy-install-app.json
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo ""
+            echo "ERROR: pCloudy APK installation failed with HTTP $HTTP_CODE."
+            exit 1
+          fi
+
+          INSTALL_STATUS="$(
+            jq -r '
+              .status //
+              .result.status //
+              (if (.code == 200 or .result.code == 200) then "success" else empty end) //
+              empty
+            ' pcloudy-install-app.json | tr '[:upper:]' '[:lower:]'
+          )"
+
+          if [ "$INSTALL_STATUS" != "success" ]; then
+            echo ""
+            echo "ERROR: pCloudy reported installation failure."
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "APK installed successfully"
+          echo "=========================================="
+
+      # ========================================================
+      # STAGE 13 - Start Performance Data
+      # ========================================================
+
+      - name: STAGE 13 - Start pCloudy performance data
+        id: performance-start
+        shell: bash
+
+        env:
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
+          RID: ${{ steps.book-device.outputs.rid }}
+          APP_PACKAGE: ${{ env.APP_PACKAGE }}
+
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 13 - Starting Performance Data"
+          echo "=========================================="
+
+          PERFORMANCE_PAYLOAD="$(
+            jq -n \
+              --arg token "$PCLOUDY_TOKEN" \
+              --arg rid "$RID" \
+              --arg pkg "$APP_PACKAGE" \
+              '{
+                token: $token,
+                rid: $rid,
+                pkg: $pkg
+              }'
+          )"
+
+          echo ""
+          echo "Performance request:"
+          echo "$PERFORMANCE_PAYLOAD" | jq 'del(.token)'
+
+          PERFORMANCE_RESPONSE="$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --retry 3 \
+              --retry-delay 3 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$PERFORMANCE_PAYLOAD" \
+              "https://device.pcloudy.com/api/start_performance_data"
+          )"
+
+          printf '%s\n' "$PERFORMANCE_RESPONSE" \
+            > pcloudy-performance-start.json
+
+          echo ""
+          echo "Performance response:"
+          echo "$PERFORMANCE_RESPONSE" | jq '.' \
+            || cat pcloudy-performance-start.json
+
+          echo ""
+          echo "Performance data collection started."
+
+
+      # ========================================================
+      # STAGE 14 - Appium Automation
+      # ========================================================
+
+      - name: STAGE 14 - Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+
+      - name: STAGE 14 - Install Appium dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 14 - Installing Appium dependencies"
+          echo "=========================================="
+
+          python -m pip install --upgrade pip
+
+          if [ ! -f requirements.txt ]; then
+            echo "ERROR: requirements.txt not found"
+            exit 1
+          fi
+
+          pip install -r requirements.txt
+
+          echo ""
+          echo "Installed packages:"
+          pip list
+
+
+      - name: STAGE 14 - Run Android Appium lifecycle test
+        id: appium-test
+        shell: bash
+
+        env:
+          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
 
           PCLOUDY_DEVICE: ${{ steps.selected-device.outputs.device }}
 
-          PCLOUDY_APPLICATION_NAME: firebase-app.apk
+          PCLOUDY_APPLICATION_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
+          PCLOUDY_APP_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
 
-          APP_PACKAGE: com.epam.mobitru
+          APP_PACKAGE: ${{ env.APP_PACKAGE }}
+
+          PCLOUDY_APPIUM_URL: ${{ env.PCLOUDY_APPIUM_URL }}
+
+          PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
+
+          RID: ${{ steps.book-device.outputs.rid }}
 
         run: |
-
           set -euo pipefail
 
           echo "=========================================="
-          echo "STAGE 13 - Starting Android Appium test"
+          echo "STAGE 14 - Starting Android Appium test"
           echo "=========================================="
 
-
           echo "Device : $PCLOUDY_DEVICE"
-
-          echo "App    : $PCLOUDY_APPLICATION_NAME"
-
+          echo "RID    : ${RID:-none}"
+          echo "App    : $PCLOUDY_APP_NAME"
           echo "Package: $APP_PACKAGE"
-
+          echo "URL    : $PCLOUDY_APPIUM_URL"
 
           if [ -z "$PCLOUDY_DEVICE" ]; then
-
             echo "ERROR: Selected pCloudy device is empty"
-
             exit 1
-
           fi
 
+          echo ""
+          echo "Testing pCloudy Appium endpoint..."
+
+          curl \
+            --http1.1 \
+            --verbose \
+            --connect-timeout 30 \
+            --max-time 60 \
+            "${PCLOUDY_APPIUM_URL}/status" \
+            || true
+
+          echo ""
+          echo "Starting Appium test..."
 
           pytest \
             automation/test_app_lifecycle.py \
-            -v \
+            -v -s \
             --tb=short \
             --junitxml=appium-results.xml
-
 
           echo ""
           echo "=========================================="
@@ -784,25 +976,233 @@ jobs:
           echo "=========================================="
 
 
-      # ==================================================
-      # STAGE 14 - Upload Results
-      # ==================================================
+      # ========================================================
+      # STAGE 15 - Download Performance Data
+      # ========================================================
 
-      - name: STAGE 14 - Upload test results
-
+      - name: STAGE 15 - Download performance data
+        id: performance-download
         if: always()
+        shell: bash
 
+        env:
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
+          RID: ${{ steps.book-device.outputs.rid }}
+
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 15 - Performance Data"
+          echo "=========================================="
+
+          mkdir -p performance-results
+
+          if [ -z "${RID:-}" ]; then
+            echo "WARNING: Reservation ID is empty."
+            echo "Skipping performance download."
+            exit 0
+          fi
+
+          # ----------------------------------------------------
+          # Get performance file list
+          # ----------------------------------------------------
+
+          FILE_LIST_PAYLOAD="$(
+            jq -n \
+              --arg token "$PCLOUDY_TOKEN" \
+              --arg rid "$RID" \
+              '{
+                token: $token,
+                rid: $rid
+              }'
+          )"
+
+          echo "Getting performance file list..."
+
+          FILE_LIST_RESPONSE="$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$FILE_LIST_PAYLOAD" \
+              "https://device.pcloudy.com/api/manual_access_files_list" \
+              || true
+          )"
+
+          printf '%s\n' "$FILE_LIST_RESPONSE" \
+            > performance-results/performance-files-list.json
+
+          echo ""
+          echo "Performance file list:"
+          echo "$FILE_LIST_RESPONSE" | jq '.' \
+            || cat performance-results/performance-files-list.json
+
+
+          # ----------------------------------------------------
+          # Download performance data
+          # ----------------------------------------------------
+
+          echo ""
+          echo "Downloading performance data..."
+
+          DOWNLOAD_RESPONSE="$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$FILE_LIST_PAYLOAD" \
+              "https://device.pcloudy.com/api/download_manual_access_data" \
+              || true
+          )"
+
+          printf '%s\n' "$DOWNLOAD_RESPONSE" \
+            > performance-results/performance-download-response.json
+
+          echo ""
+          echo "Download response:"
+          echo "$DOWNLOAD_RESPONSE" | jq '.' \
+            || cat performance-results/performance-download-response.json
+
+
+          # ----------------------------------------------------
+          # Extract download URL
+          # ----------------------------------------------------
+
+          DOWNLOAD_URL="$(
+            printf '%s' "$DOWNLOAD_RESPONSE" |
+            jq -r '
+              .result.url //
+              .result.download_url //
+              .result.downloadUrl //
+              .url //
+              empty
+            ' 2>/dev/null || true
+          )"
+
+          if [ -n "$DOWNLOAD_URL" ]; then
+
+            echo ""
+            echo "Performance download URL found."
+
+            curl \
+              --silent \
+              --show-error \
+              --location \
+              --retry 5 \
+              --retry-delay 3 \
+              --retry-all-errors \
+              --connect-timeout 30 \
+              --max-time 300 \
+              --output performance-results/performance-data \
+              "$DOWNLOAD_URL" \
+              || true
+
+          else
+
+            echo ""
+            echo "No direct download URL returned by pCloudy."
+
+          fi
+
+          echo ""
+          echo "Performance data collection step completed."
+
+
+      # ========================================================
+      # STAGE 16 - Release Device
+      # ========================================================
+
+      - name: STAGE 16 - Release pCloudy device
+        id: release-device
+        if: always()
+        shell: bash
+
+        env:
+          PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
+          RID: ${{ steps.book-device.outputs.rid }}
+          DEVICE_ID: ${{ steps.book-device.outputs.device_id }}
+
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "STAGE 16 - Releasing pCloudy Device"
+          echo "=========================================="
+
+          if [ -z "${RID:-}" ]; then
+            echo "WARNING: No reservation ID available."
+            echo "Nothing to release."
+            exit 0
+          fi
+
+          RELEASE_PAYLOAD="$(
+            jq -n \
+              --arg token "$PCLOUDY_TOKEN" \
+              --arg rid "$RID" \
+              --arg id "$DEVICE_ID" \
+              '{
+                token: $token,
+                rid: $rid,
+                id: $id
+              }'
+          )"
+
+          echo ""
+          echo "Release request:"
+          echo "$RELEASE_PAYLOAD" | jq 'del(.token)'
+
+          RELEASE_RESPONSE="$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$RELEASE_PAYLOAD" \
+              "https://device.pcloudy.com/api/release_device" \
+              || true
+          )"
+
+          printf '%s\n' "$RELEASE_RESPONSE" \
+            > pcloudy-release.json
+
+          echo ""
+          echo "Release response:"
+          echo "$RELEASE_RESPONSE" | jq '.' \
+            || cat pcloudy-release.json
+
+          echo ""
+          echo "Device release request completed."
+
+
+      # ========================================================
+      # STAGE 17 - Upload Results
+      # ========================================================
+
+      - name: STAGE 17 - Upload automation and performance results
+        if: always()
         uses: actions/upload-artifact@v4
 
         with:
-
-          name: android-appium-test-results
+          name: android-pcloudy-results
 
           path: |
             appium-results.xml
             firebase-release.json
+            pcloudy-auth.json
             pcloudy-devices.json
             pcloudy-upload.json
-            firebase-app.apk
+            pcloudy-book-device.json
+            pcloudy-install-app.json
+            pcloudy-performance-start.json
+            pcloudy-release.json
+            performance-results/
 
           if-no-files-found: warn
+
+          retention-days: 7
