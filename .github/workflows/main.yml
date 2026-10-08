@@ -18,25 +18,11 @@ env:
 
 jobs:
 
-  checkout:
-    name: Checkout Repository
+  run-pcloudy-tests:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-  firebase_pipeline:
-    name: Firebase Authentication and APK Download
-    runs-on: ubuntu-latest
-    needs: checkout
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Firebase Authentication
+      - name: Authenticate with Firebase
         uses: google-github-actions/auth@v2
         with:
           credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
@@ -189,30 +175,6 @@ jobs:
 
           ls -lh firebase-app.apk
 
-      - name: Upload APK artifact for next job
-        uses: actions/upload-artifact@v4
-        with:
-          name: firebase-apk
-          path: firebase-app.apk
-          if-no-files-found: error
-          retention-days: 1
-
-
-  verify_apk:
-    name: Verify APK
-    runs-on: ubuntu-latest
-    needs: firebase_pipeline
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download APK artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: firebase-apk
-          path: .
-
       - name: Verify APK
         shell: bash
         run: |
@@ -233,17 +195,7 @@ jobs:
 
           echo "APK size: ${APK_SIZE} bytes"
           echo "APK verification successful"
-
-
-  pcloudy_authentication:
-    name: pCloudy Authentication
-    runs-on: ubuntu-latest
-    needs: verify_apk
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+          
       - name: pCloudy Authentication
         id: pcloudy-auth
         shell: bash
@@ -293,56 +245,9 @@ jobs:
           fi
 
           echo "::add-mask::$TOKEN"
-          echo "pCloudy authentication successful"
-
-
-  fetch_target_devices:
-    name: Fetch Target Devices
-    runs-on: ubuntu-latest
-    needs: [pcloudy_authentication, verify_apk]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Authenticate to pCloudy for device lookup
-        id: pcloudy-auth
-        shell: bash
-        env:
-          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
-          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "pCloudy Authentication"
-          echo "=========================================="
-
-          RESPONSE="$(
-            curl \
-              --silent \
-              --show-error \
-              --fail-with-body \
-              --retry 5 \
-              --retry-delay 3 \
-              --retry-all-errors \
-              -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
-              "https://device.pcloudy.com/api/access"
-          )"
-
-          TOKEN="$(
-            printf '%s' "$RESPONSE" |
-            jq -r '.result.token // empty'
-          )"
-
-          if [ -z "$TOKEN" ]; then
-            echo "ERROR: Could not extract pCloudy token"
-            exit 1
-          fi
-
-          echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
-
+          echo "pCloudy authentication successful"
+      
       - name: Fetch Target Devices
         shell: bash
         env:
@@ -418,68 +323,7 @@ jobs:
           jq -r \
             '.devices[]? | select(.enabled == true) | .name' \
             "$DEVICES_FILE"
-
-      - name: Save target device snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: pcloudy-device-snapshot
-          path: pcloudy-devices.json
-          if-no-files-found: warn
-          retention-days: 1
-
-
-  upload_apk:
-    name: Upload APK to pCloudy
-    runs-on: ubuntu-latest
-    needs: [pcloudy_authentication, fetch_target_devices, verify_apk]
-
-    outputs:
-      filename: ${{ steps.pcloudy-upload.outputs.filename }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download verified APK artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: firebase-apk
-          path: .
-
-      - name: Authenticate to pCloudy for APK upload
-        id: pcloudy-auth
-        shell: bash
-        env:
-          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
-          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
-        run: |
-          set -euo pipefail
-
-          RESPONSE="$(
-            curl \
-              --silent \
-              --show-error \
-              --fail-with-body \
-              --retry 5 \
-              --retry-delay 3 \
-              --retry-all-errors \
-              -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
-              "https://device.pcloudy.com/api/access"
-          )"
-
-          TOKEN="$(
-            printf '%s' "$RESPONSE" |
-            jq -r '.result.token // empty'
-          )"
-
-          if [ -z "$TOKEN" ]; then
-            echo "ERROR: Could not extract pCloudy token"
-            exit 1
-          fi
-
-          echo "::add-mask::$TOKEN"
-          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
-
+            
       - name: Upload APK to pCloudy
         id: pcloudy-upload
         shell: bash
@@ -552,56 +396,6 @@ jobs:
 
           echo "APK uploaded successfully"
 
-
-  execute_tests:
-    name: Execute Tests on Devices
-    runs-on: ubuntu-latest
-    needs: [upload_apk, fetch_target_devices]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download target device snapshot
-        uses: actions/download-artifact@v4
-        with:
-          name: pcloudy-device-snapshot
-          path: .
-
-      - name: Authenticate to pCloudy for Appium tests
-        id: pcloudy-auth
-        shell: bash
-        env:
-          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
-          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
-        run: |
-          set -euo pipefail
-
-          RESPONSE="$(
-            curl \
-              --silent \
-              --show-error \
-              --fail-with-body \
-              --retry 5 \
-              --retry-delay 3 \
-              --retry-all-errors \
-              -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
-              "https://device.pcloudy.com/api/access"
-          )"
-
-          TOKEN="$(
-            printf '%s' "$RESPONSE" |
-            jq -r '.result.token // empty'
-          )"
-
-          if [ -z "$TOKEN" ]; then
-            echo "ERROR: Could not extract pCloudy token"
-            exit 1
-          fi
-
-          echo "::add-mask::$TOKEN"
-          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -631,8 +425,8 @@ jobs:
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
           PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
-          PCLOUDY_APPLICATION_NAME: ${{ needs.upload_apk.outputs.filename }}
-          PCLOUDY_APP_NAME: ${{ needs.upload_apk.outputs.filename }}
+          PCLOUDY_APPLICATION_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
+          PCLOUDY_APP_NAME: ${{ steps.pcloudy-upload.outputs.filename }}
           APP_PACKAGE: ${{ env.APP_PACKAGE }}
           PCLOUDY_APPIUM_URL: ${{ env.PCLOUDY_APPIUM_URL }}
           PCLOUDY_ENABLE_PERFORMANCE_DATA: "true"
@@ -893,3 +687,4 @@ jobs:
             device-results/
           if-no-files-found: warn
           retention-days: 7
+
